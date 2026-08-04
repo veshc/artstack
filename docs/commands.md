@@ -1,0 +1,41 @@
+# Command reference
+
+Ten commands, two tracks. Every command reads `context/art.md` and `context/team.md` first, reads real work items via MCP when connected, and outputs draft markdown only. No command writes to your tracker, merges, pushes, or files anything. Full prompt text lives in `commands/`.
+
+## Engineer track
+
+### /pi-prep
+Role: product owner's prep partner. Input: an epic or feature (ID or pasted). Output: vertical-sliced stories with real acceptance criteria (including NFRs), enablers marked, dependencies against the art.md table, ROAM-ready risks, load vs capacity, proposed objective wording and demo statement. Refuses to invent stakeholders, dates, or owners; gaps become Open questions. Use before planning, or whenever a feature needs decomposition.
+
+### /wsjf
+Role: prioritization analyst. Input: two or more candidate features/epics. Output: WSJF scoring table (relative Fibonacci units), an argued "because" for every score across value, time criticality, risk/opportunity, and size, then a recommendation that also names what the numbers hide (dependency order, near-ties, shaky assumptions). Use when priority is contested and the PO needs a defensible case.
+
+### /feature-review
+Role: product owner challenging scope; the four gstack review modes adapted to trains. Modes: `expand` (find the fuller product, then price every expansion in capacity and dependencies), `selective` (hold core, cherry-pick 2-3 additions that fit the margin), `hold` (maximum rigor, zero new scope, attack criteria/NFRs/dates/demo-ability), `reduce` (strip to the smallest demoable core, name where every cut goes). Ends with three sentences the PO can say at planning. Use before committing scope to a PI, or when an iteration is going sideways (reduce).
+
+### /arch-runway
+Role: system architect. Input: a feature's technical plan (or it proposes one, labeled as such). Output: verdict LOCKED or BLOCKED, with runway fit (consume/extend/ignore), end-to-end data flow checked against residency and audit NFRs, contract and cross-team impact, edge-case table with handling and tests, line-by-line NFR compliance, and proposed simplifications. BLOCKED is a respectable outcome. Use after decomposition, before build.
+
+### /review
+Role: staff engineer hunting what CI misses. Input: branch, PR, paths, or working tree. Output: verdict (approve / approve with comments / request changes), findings ranked BLOCKER/MAJOR/MINOR with file:line and concrete fixes, acceptance-criteria check against the linked story, and named missing tests. Priorities: correctness, concurrency, cross-team contract breaks, security, NFR regressions, test honesty, then maintainability. Never merges or approves in the real system. Use before every PR.
+
+### /demo-prep
+Role: demo producer. Input: iteration or list of completed stories. Output: a run sheet with timings, click-by-click segment scripts a non-author can drive, the "money shot" per segment, scripted honesty about what is not done, stakeholder feedback prompts, fallbacks, and a pre-demo checklist. DoD violations move items to "not demoed" with reasons. Use in the last days before each system demo.
+
+## QA automation track
+
+### /test-plan
+Role: test architect. Input: feature plus stories. Output: risk ranking (money, data, contracts, workflow, cosmetic), a coverage map from every acceptance criterion to a test at the lowest sufficient level, tests beyond the criteria (edge cases, negatives, permissions, idempotency), NFR test approach, automation/manual split with reasons, and sequenced automation work with estimates. Use when a feature enters an iteration, before /automate.
+
+### /automate
+Role: automation engineer pair. Input: story (ideally with its /test-plan rows). Output: runnable test code in the team's frameworks following existing repo patterns, executed where the session allows, with a table of what ran, coverage vs criteria, product issues found on the way, and an atomic commit breakdown for the human to commit. Drives a real browser for UI stories when a browser tool is available (the gstack /qa loop). Use during the iteration, story by story.
+
+### /regression
+Role: regression strategist. Input: diff, branch, PR, or feature. Output: blast radius (cross-team impact first), concrete suite selection with exact run commands and an "excluded on purpose" list, ranked coverage gaps where changed behavior has no honest test, new tests for the worst gaps, and a residual-risk verdict for merging. Use before merging to a release branch and before PI-end hardening.
+
+### /defect
+Role: defect analyst. Input: any failure evidence (failing test, log, screenshot, description). Output: a complete report in the team's template: minimal reproduction, expected-vs-actual with cited sources, suspected cause with confidence level from actually reading the code, argued severity including train-level impact, and the named regression test that should exist. Checks for duplicates first when MCP is connected. Drafts only; you file it. Use the moment something breaks.
+
+## Typical feature flow
+
+/pi-prep, /wsjf if contested, /feature-review, /arch-runway, build with /automate running alongside, /review before the PR, /regression before release-branch merge, /demo-prep at iteration end, /defect whenever reality disagrees with the plan. The worked example in `examples/payment-status-feature/` shows the artifacts at each step.
