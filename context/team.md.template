@@ -1,0 +1,42 @@
+# Team context: <team name>
+
+Team-level truth. Refresh when the team's stack, norms, or membership shape changes. No secrets, no personal data.
+
+## What we own
+
+<Components, services, or product areas this team is responsible for.>
+
+## Stack
+
+- Languages/frameworks: <e.g. C#/.NET 8, React/TypeScript>
+- Build/CI: <e.g. Azure Pipelines, YAML in /pipelines>
+- Branching: <e.g. trunk-based with gated PRs to main; release branches per PI>
+
+## Test strategy
+
+- Unit: <framework, location, conventions, e.g. xUnit in tests/Unit, one test class per SUT>
+- Integration: <framework, environment, how to run>
+- E2E/UI: <e.g. Playwright in tests/e2e, page-object pattern, tagging conventions>
+- API: <e.g. Postman collections in /postman, run with newman>
+- Naming and tagging conventions: <e.g. @smoke, @regression tags>
+- Coverage expectations: <what must be covered before a story is done>
+
+## Work item conventions
+
+- Tracker: <Azure DevOps org/project and area path, or Jira project key>
+- Hierarchy in use: <e.g. Epic > Feature > User Story > Task; bug template name>
+- Story template: <fields the team fills: acceptance criteria format, e.g. Gherkin or bullet list>
+- Estimation: <e.g. Fibonacci story points, capacity per iteration>
+
+## Review rules
+
+- PR size norms, required reviewers, what blocks a merge.
+- <e.g. two approvals, one from code owner; no PR over 400 changed lines without a design note>
+
+## Iteration cadence
+
+- <iteration length, planning day, demo day, retro day>
+
+## Definition of done (team additions)
+
+- <items beyond the train DoD in art.md>

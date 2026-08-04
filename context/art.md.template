@@ -1,0 +1,48 @@
+# ART context: <train name>
+
+Refresh this file at each planning-interval boundary. Everything here is train-level truth that every command reads. Keep it under two pages. No secrets, no credentials, no customer data.
+
+## Planning interval
+
+- PI number: <e.g. PI-14>
+- Dates: <start> to <end>
+- Iterations: <e.g. 5 x 2 weeks plus 1 IP iteration>
+- Key ceremonies: <PI planning dates, system demo cadence, inspect and adapt date>
+
+## PI objectives
+
+List the committed and stretch objectives for this PI, with the business value score if your train assigns one.
+
+1. <objective> (committed, BV <n>)
+2. <objective> (stretch, BV <n>)
+
+## Teams on the train
+
+| Team | Owns | Key contact |
+| --- | --- | --- |
+| <team> | <domain/components> | <role, not personal data if this repo is shared> |
+
+## Cross-team dependencies this PI
+
+| Depends on | For | Needed by |
+| --- | --- | --- |
+| <team> | <what> | <iteration> |
+
+## Architectural runway
+
+What platform/enabler work already exists that features should build on, and what runway is being built this PI. Commands use this to judge whether a plan consumes, extends, or ignores the runway.
+
+- <existing runway item>
+- <in-progress enabler and its ETA>
+
+## Nonfunctional requirements
+
+The NFRs every feature must respect. Examples: performance budgets, availability targets, accessibility level, data residency, audit logging.
+
+- <NFR>
+
+## Definition of done
+
+The train-level DoD. Story-level additions live in team.md.
+
+- <item>
