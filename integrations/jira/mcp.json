@@ -1,0 +1,14 @@
+{
+  "comment": "Template for Claude Code MCP config (merge into your mcpServers). Read-only API token via env vars. Replace the command with the Jira MCP server your org approves.",
+  "mcpServers": {
+    "jira": {
+      "command": "npx",
+      "args": ["-y", "@atlassian/jira-mcp-server"],
+      "env": {
+        "JIRA_SITE_URL": "https://YOUR_SITE.atlassian.net",
+        "JIRA_USER_EMAIL": "you@example.com",
+        "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
+      }
+    }
+  }
+}

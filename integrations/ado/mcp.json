@@ -1,0 +1,14 @@
+{
+  "comment": "Template for Claude Code MCP config (merge into your mcpServers). Read-only PAT via env var. Replace the command with the ADO MCP server package your org approves.",
+  "mcpServers": {
+    "azure-devops": {
+      "command": "npx",
+      "args": ["-y", "@azure-devops/mcp-server"],
+      "env": {
+        "ADO_ORG_URL": "https://dev.azure.com/YOUR_ORG",
+        "ADO_PROJECT": "YOUR_PROJECT",
+        "ADO_PAT": "${ADO_PAT}"
+      }
+    }
+  }
+}
