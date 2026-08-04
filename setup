@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# ArtStack setup: copies commands and context templates into ~/.claude
+# Does nothing else. No network calls, no telemetry.
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAUDE_DIR="${HOME}/.claude"
+
+echo "ArtStack setup"
+echo "Repo: ${REPO_DIR}"
+
+mkdir -p "${CLAUDE_DIR}/commands/artstack"
+cp "${REPO_DIR}"/commands/*.md "${CLAUDE_DIR}/commands/artstack/"
+echo "Installed commands to ${CLAUDE_DIR}/commands/artstack/"
+
+if [ ! -f "${REPO_DIR}/context/art.md" ]; then
+  cp "${REPO_DIR}/context/art.md.template" "${REPO_DIR}/context/art.md"
+  echo "Created context/art.md from template. Fill it in for your train."
+fi
+if [ ! -f "${REPO_DIR}/context/team.md" ]; then
+  cp "${REPO_DIR}/context/team.md.template" "${REPO_DIR}/context/team.md"
+  echo "Created context/team.md from template. Fill it in for your team."
+fi
+
+echo ""
+echo "Next steps:"
+echo "  1. Fill in context/art.md and context/team.md (see context/examples/ for filled-in examples)"
+echo "  2. Add the include lines from CLAUDE.md to your project's CLAUDE.md, or copy it"
+echo "  3. Optional: configure Azure DevOps or Jira MCP (see integrations/)"
+echo "  4. Start with /pi-prep on a feature"
