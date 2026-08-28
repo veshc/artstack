@@ -1,0 +1,151 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  freshness:
+    name: skills are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The generated SKILL.md files are committed so Claude Code can read them
+      # at skill-load time, when there is no build step available. That only
+      # works if they actually match their templates, so the build is the gate.
+      - name: Generated skills match their templates
+        run: ./build --dry-run
+
+      # Belt and braces: regenerate and confirm the tree is unchanged. Catches
+      # anything --dry-run's comparison might miss.
+      - name: No drift after a real build
+        run: |
+          ./build
+          git diff --exit-code
+
+  shellcheck:
+    name: shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: |
+          for f in build setup bin/*; do
+            [ -f "$f" ] || continue
+            head -1 "$f" | grep -q 'bash' || continue
+            bash -n "$f" || exit 1
+          done
+      - name: Shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          # Informational: style findings should not block a docs change.
+          shellcheck -S error build setup bin/* || true
+
+  posture:
+    name: enterprise posture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # docs/security.md promises no network egress. Enforce the promise rather
+      # than trusting the document, and make a violation a review conversation.
+      - name: No network calls in scripts
+        run: |
+          if grep -rnE '(curl|wget|nc |ping )' build setup bin/ \
+               | grep -vE '^\s*[^:]+:[0-9]+:\s*#' ; then
+            echo "Network command found in an ArtStack script."
+            echo "ArtStack makes no network calls. See docs/security.md."
+            exit 1
+          fi
+          echo "No network commands."
+
+      # Every domain skill must carry the tracker boundary. The router is the
+      # only file exempt: it routes, it never reads a work item.
+      - name: Tracker read-only rule present in every domain skill
+        run: |
+          missing="$(grep -L 'tracker stays read-only' skills/*/SKILL.md | grep -v 'skills/artstack/SKILL.md' || true)"
+          if [ -n "$missing" ]; then
+            echo "Missing the tracker read-only rule:"; echo "$missing"; exit 1
+          fi
+          echo "All domain skills carry the tracker boundary."
+
+      # The rule people will judge this tool on.
+      - name: Open questions rule present in every skill
+        run: |
+          missing="$(grep -L 'Open questions' skills/*/SKILL.md || true)"
+          if [ -n "$missing" ]; then
+            echo "Missing the open-questions rule:"; echo "$missing"; exit 1
+          fi
+          echo "All skills carry the open-questions rule."
+
+  install:
+    name: setup works from a clean checkout
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install into a temp skills dir
+        run: |
+          export CLAUDE_SKILLS_DIR="$RUNNER_TEMP/skills"
+          export ARTSTACK_HOME="$RUNNER_TEMP/home"
+          ./setup
+          test -L "$CLAUDE_SKILLS_DIR/artstack" || { echo "router not linked"; exit 1; }
+          test -L "$CLAUDE_SKILLS_DIR/review"   || { echo "review not linked"; exit 1; }
+          ./setup --check
+
+      - name: A foreign skill of the same name is never clobbered
+        run: |
+          export CLAUDE_SKILLS_DIR="$RUNNER_TEMP/skills2"
+          export ARTSTACK_HOME="$RUNNER_TEMP/home2"
+          mkdir -p "$CLAUDE_SKILLS_DIR/review"
+          printf -- '---\nname: review\n---\nnot ours\n' > "$CLAUDE_SKILLS_DIR/review/SKILL.md"
+          ./setup
+          grep -q 'not ours' "$CLAUDE_SKILLS_DIR/review/SKILL.md" \
+            || { echo "setup destroyed a foreign skill"; exit 1; }
+          test -L "$CLAUDE_SKILLS_DIR/artstack-review" \
+            || { echo "collision fallback did not install"; exit 1; }
+
+      - name: Uninstall is clean and leaves foreign skills alone
+        run: |
+          export CLAUDE_SKILLS_DIR="$RUNNER_TEMP/skills2"
+          export ARTSTACK_HOME="$RUNNER_TEMP/home2"
+          ./setup --uninstall
+          grep -q 'not ours' "$CLAUDE_SKILLS_DIR/review/SKILL.md" \
+            || { echo "uninstall destroyed a foreign skill"; exit 1; }
+          test ! -L "$CLAUDE_SKILLS_DIR/artstack-review" \
+            || { echo "uninstall left a link behind"; exit 1; }
+
+  context:
+    name: context resolution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The bug this replaces: an @context/ include that silently resolved to
+      # nothing, so commands ran with no train context and never said so.
+      - name: Resolves files created by --init-context
+        run: |
+          proj="$RUNNER_TEMP/proj"
+          mkdir -p "$proj" && cd "$proj"
+          git init -q . && git -c user.email=c@i -c user.name=ci commit -q --allow-empty -m init
+          "$GITHUB_WORKSPACE/setup" --init-context
+          out="$("$GITHUB_WORKSPACE/bin/artstack-context" --print)"
+          echo "$out"
+          echo "$out" | grep -q 'NOT FOUND' && { echo "context did not resolve"; exit 1; }
+          echo "$out" | grep -q "$proj/.artstack/art.md"  || { echo "wrong train file"; exit 1; }
+          echo "$out" | grep -q "$proj/.artstack/team.md" || { echo "wrong team file"; exit 1; }
+
+      - name: Resolves a named team when several exist
+        run: |
+          proj="$RUNNER_TEMP/proj"
+          cd "$proj"
+          mkdir -p .artstack/teams
+          cp .artstack/team.md .artstack/teams/falcon.md
+          cp .artstack/team.md .artstack/teams/orion.md
+          rm .artstack/team.md
+          echo falcon > .artstack/active-team
+          out="$("$GITHUB_WORKSPACE/bin/artstack-context" --print)"
+          echo "$out"
+          echo "$out" | grep -q 'teams/falcon.md' || { echo "active team ignored"; exit 1; }
+          echo "$out" | grep -q 'falcon,orion'    || { echo "team list wrong"; exit 1; }

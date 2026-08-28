@@ -1,0 +1,53 @@
+---
+name: artstack
+preamble-tier: 1
+version: 0.2.0
+description: Router for the ArtStack skill suite - AI workflows for teams on agile release trains. Sends a request to the right ArtStack skill for planning-interval prep, WSJF prioritisation, scope review, architectural runway, code review, test planning, test automation, regression analysis, defect reports, and system demos. Use when someone invokes artstack without naming a skill, asks which ArtStack command fits, or describes train work without naming a command. (artstack)
+triggers:
+  - artstack
+  - which artstack skill
+  - route this with artstack
+allowed-tools:
+  - Bash
+  - Read
+  - AskUserQuestion
+---
+
+{{PREAMBLE}}
+
+# ArtStack router
+
+This is the ArtStack router. Its one job is to send the request to the right
+skill, and to say plainly when no skill fits.
+
+ArtStack is for people delivering on a large agile release train: engineers, QA
+automation engineers, and the product owners they work with. It assumes a fixed
+cadence, gated pull requests, and roles that already exist and belong to humans.
+
+{{ROUTING_TABLE}}
+
+## Two tracks
+
+**Engineer track** - `/pi-prep`, `/wsjf`, `/feature-review`, `/arch-runway`,
+`/review`, `/demo-prep`
+
+**QA automation track** - `/test-plan`, `/automate`, `/regression`, `/defect`
+
+## The usual flow for one feature
+
+`/pi-prep` to decompose it, `/wsjf` if priority is contested, `/feature-review`
+to challenge the scope, `/arch-runway` to lock the technical approach, build,
+`/test-plan` then `/automate` for coverage, `/review` before the pull request,
+`/regression` before merging to a release branch, `/demo-prep` at the end of the
+iteration. `/defect` any time reality disagrees with the plan.
+
+Nothing forces that order. A person who only ever runs `/review` and `/defect`
+is using ArtStack correctly.
+
+## If context is missing
+
+If the preamble reported `ART_FILE: none`, the train file has not been set up
+for this repository. Say so, point at `./setup --init-context`, and offer to
+continue without it. Most skills still produce something useful with no train
+file; they just cannot check objectives, dependencies, NFRs, or the definition
+of done, and they must say which of those checks they skipped.

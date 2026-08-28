@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# artstack-context - resolve this repo's ArtStack context files.
+#
+# Usage:
+#   eval "$(artstack-context)"     # sets ARTSTACK_ART / ARTSTACK_TEAM / ...
+#   artstack-context               # print the KEY=value lines
+#   artstack-context --print       # human-readable report of what resolved
+#
+# Why this exists. The old wiring put `@context/art.md` in a CLAUDE.md that you
+# were told to copy into your project, while the files themselves stayed in the
+# ArtStack clone. The include resolved against your project root and silently
+# found nothing, so every command ran with no train context and never said so.
+# Resolution is done here, in one place, and commands report what they got.
+#
+# Search order for the train file (first hit wins):
+#   1. $ARTSTACK_ART                       explicit override
+#   2. <repo root>/.artstack/art.md        committed with the code (recommended)
+#   3. <repo root>/context/art.md          legacy in-repo location
+#   4. ~/.artstack/art.md                  personal fallback, not shared
+#
+# Team files. A train has many teams, so the team file is resolved by name and
+# several may sit side by side. Order:
+#   1. $ARTSTACK_TEAM                      explicit override
+#   2. <state>/teams/$ARTSTACK_TEAM_NAME.md
+#   3. <state>/team.md                     single-team repo, the common case
+#   4. ~/.artstack/team.md
+#
+# $ARTSTACK_TEAM_NAME comes from --team, the env, or .artstack/active-team.
+# One team per repo is the normal case and needs no configuration; the teams/
+# directory exists so a repo shared by several teams on the same train does not
+# have to be restructured later.
+#
+# Nothing here reads the network and nothing is written outside the repo.
+set -euo pipefail
+
+PRINT=0
+TEAM_ARG=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --print) PRINT=1; shift ;;
+    --team) TEAM_ARG="${2:-}"; shift 2 ;;
+    --help|-h) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "artstack-context: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+STATE_DIR="${ARTSTACK_STATE_DIR:-$REPO_ROOT/.artstack}"
+HOME_DIR="${HOME:-}"
+
+_first_existing() {
+  for c in "$@"; do
+    [ -n "$c" ] && [ -f "$c" ] && { printf '%s' "$c"; return 0; }
+  done
+  return 0
+}
+
+# ── Train file ────────────────────────────────────────────────
+ART="$(_first_existing \
+  "${ARTSTACK_ART:-}" \
+  "$STATE_DIR/art.md" \
+  "$REPO_ROOT/context/art.md" \
+  "${HOME_DIR:+$HOME_DIR/.artstack/art.md}")"
+
+# ── Active team name ──────────────────────────────────────────
+TEAM_NAME="$TEAM_ARG"
+if [ -z "$TEAM_NAME" ] && [ -n "${ARTSTACK_TEAM_NAME:-}" ]; then
+  TEAM_NAME="$ARTSTACK_TEAM_NAME"
+fi
+if [ -z "$TEAM_NAME" ] && [ -f "$STATE_DIR/active-team" ]; then
+  # Single line, trimmed. Anything else is ignored rather than trusted.
+  TEAM_NAME="$(head -1 "$STATE_DIR/active-team" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+fi
+# Keep the name usable as a path segment; never let it escape the teams dir.
+TEAM_NAME="$(printf '%s' "$TEAM_NAME" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//')"
+
+TEAM="$(_first_existing \
+  "${ARTSTACK_TEAM:-}" \
+  "${TEAM_NAME:+$STATE_DIR/teams/$TEAM_NAME.md}" \
+  "$STATE_DIR/team.md" \
+  "$REPO_ROOT/context/team.md" \
+  "${HOME_DIR:+$HOME_DIR/.artstack/team.md}")"
+
+# Every team file this repo can see, so a command can say "you have four teams
+# and did not say which" instead of silently picking one.
+TEAMS_AVAILABLE=""
+if [ -d "$STATE_DIR/teams" ]; then
+  TEAMS_AVAILABLE="$(find "$STATE_DIR/teams" -maxdepth 1 -name '*.md' -type f 2>/dev/null \
+    | sed 's|.*/||; s|\.md$||' | sort | tr '\n' ',' | sed 's/,$//')"
+fi
+
+if [ "$PRINT" = "1" ]; then
+  echo "ArtStack context"
+  echo "  repo root : $REPO_ROOT"
+  echo "  state dir : $STATE_DIR"
+  if [ -n "$ART" ]; then echo "  train     : $ART"
+  else echo "  train     : NOT FOUND (run ./setup --init-context from your repo)"; fi
+  if [ -n "$TEAM" ]; then echo "  team      : $TEAM"
+  else echo "  team      : NOT FOUND (run ./setup --init-context from your repo)"; fi
+  [ -n "$TEAMS_AVAILABLE" ] && echo "  teams     : $TEAMS_AVAILABLE"
+  exit 0
+fi
+
+printf 'ARTSTACK_ART=%s\n' "$ART"
+printf 'ARTSTACK_TEAM=%s\n' "$TEAM"
+printf 'ARTSTACK_TEAM_NAME=%s\n' "$TEAM_NAME"
+printf 'ARTSTACK_TEAMS_AVAILABLE=%s\n' "$TEAMS_AVAILABLE"
+printf 'ARTSTACK_CONTEXT_REPO_ROOT=%s\n' "$REPO_ROOT"

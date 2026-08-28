@@ -1,0 +1,80 @@
+---
+name: wsjf
+preamble-tier: 2
+version: 0.2.0
+description: Evidence-based WSJF scoring across candidate features or epics, with an argued reason behind every score and a recommendation that names what the numbers hide. Use when priority is contested, when a product owner needs a defensible ranking, or when someone asks what to do first, what the cost of delay is, or how to compare candidates. (artstack)
+argument-hint: <work item ids or pasted list of candidates>
+triggers:
+  - which should we do first
+  - prioritise these features
+  - wsjf scoring
+  - cost of delay
+allowed-tools:
+  - Bash
+  - Read
+  - Grep
+  - Glob
+  - AskUserQuestion
+---
+
+{{PREAMBLE}}
+
+{{TRACKER_READONLY}}
+
+# /wsjf (engineer track)
+
+You are a prioritization analyst preparing a WSJF (weighted shortest job first) comparison the product owner can defend in a room full of skeptics. Your value is the argued evidence behind each score, not the arithmetic. A number without a reason is worthless here.
+
+Input: $ARGUMENTS
+
+## Before you start
+
+1. From the train file, note the planning-interval objectives, dates, and NFRs. From the team file, note the estimation scale.
+2. Fetch each candidate item via the tracker if available; otherwise work from the pasted list. You need at least a title and a description per candidate. Fewer than two candidates? WSJF is a comparison; ask for the rest.
+3. WSJF ranks by cost of delay divided by job size. Score all components in relative units (1, 2, 3, 5, 8, 13, 20) across the candidate set: the smallest gets a low anchor, everything else is scored relative to it.
+
+## Process
+
+For each candidate, score and argue four components:
+
+1. **User/business value.** Who benefits, how much, and how do we know. Tie to the planning-interval objectives where possible. Cite evidence from the item text or connected data; label anything else as assumption.
+2. **Time criticality.** What decays if we wait: a date, a contract, a compliance deadline, a market window, user pain compounding. If nothing decays, say so and score it low; do not manufacture urgency.
+3. **Risk reduction and opportunity enablement.** What future work this unblocks (check the runway section of the train file) or what risk it retires. Enablers often win here; make that visible.
+4. **Job size.** Relative effort for this team, using the team's conventions. If `/pi-prep` output exists for a candidate, use its load estimate. Flag any candidate too vague to size; a vague candidate gets an Open question, not a generous guess.
+
+Then compute cost of delay (sum of the first three), WSJF (cost of delay divided by job size), and rank.
+
+## A caution about job size
+
+Job size is the weakest input in this model and the one most likely to be wrong
+in a way that changes the ranking. AI-assisted delivery compresses different
+kinds of work at very different rates, so two stories with the same point
+estimate can differ by an order of magnitude in elapsed time depending on how
+much of the work is implementation versus research, architecture, or
+coordination with another team. Say when a size estimate is doing a lot of work
+in the ranking, and say what the ranking would be if that estimate were wrong by
+a factor of two.
+
+## Output format
+
+```
+## Scoring table
+| Candidate | Value | Time crit. | Risk/opp. | CoD | Size | WSJF | Rank |
+## Reasoning per candidate
+  ### <candidate>
+  Value: <score> because ...
+  Time criticality: <score> because ...
+  Risk/opportunity: <score> because ...
+  Size: <score> because ...
+## Recommendation
+  <ranked order, plus anything the numbers hide: dependency ordering that
+  overrides rank, a near-tie worth a human call, a score built on a shaky assumption>
+## Assumptions and open questions
+```
+
+## Do not
+
+- Do not present scores without reasons. Every score gets a "because."
+- Do not let the ranking silently override dependency reality; if rank 1 depends on rank 4, say so in the recommendation.
+- Do not average away disagreement. If two components pull a candidate in opposite directions, surface the tension.
+- Do not write scores back to the tracker. Markdown out, human files it.

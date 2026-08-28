@@ -1,6 +1,14 @@
 # ART context: <train name>
 
-Refresh this file at each planning-interval boundary. Everything here is train-level truth that every command reads. Keep it under two pages. No secrets, no credentials, no customer data.
+Lives at `.artstack/art.md` in the repository your team works in. Commit it so
+the whole team reads one copy.
+
+Refresh this file at each planning-interval boundary, and give that refresh a
+named owner on the same checklist as the planning event itself. Everything here
+is train-level truth that every skill reads. Keep it under two pages. No
+secrets, no credentials, no customer data.
+
+Stale context is worse than none: it is confidently wrong and nobody notices.
 
 ## Planning interval
 

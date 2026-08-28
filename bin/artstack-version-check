@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# artstack-version-check - say whether the installed skills are stale.
+#
+# Usage:
+#   artstack-version-check           # print one line if stale, nothing if current
+#   artstack-version-check --record  # record the current VERSION as installed
+#   artstack-version-check --status  # always print both versions
+#
+# This never touches the network. It compares two files on this machine: the
+# VERSION in the ArtStack checkout the skills are linked to, and the version
+# recorded the last time ./setup ran. That catches the case that actually bites
+# people - you pulled and forgot to re-run setup - without a phone-home, an
+# update service, or a request leaving the machine.
+#
+# Checking for a *newer release* is deliberately not done here. That needs the
+# network, and ArtStack's whole posture is that nothing calls out. Run
+# `git -C <your artstack checkout> pull` on your own schedule.
+set -euo pipefail
+
+MODE="check"
+case "${1:-}" in
+  --record) MODE="record" ;;
+  --status) MODE="status" ;;
+  --help|-h) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  "") ;;
+  *) echo "artstack-version-check: unknown flag: $1" >&2; exit 2 ;;
+esac
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+VERSION_FILE="$REPO_DIR/VERSION"
+
+STATE_HOME="${ARTSTACK_HOME:-${HOME:-.}/.artstack}"
+STAMP="$STATE_HOME/installed-version"
+
+[ -f "$VERSION_FILE" ] || exit 0
+CURRENT="$(head -1 "$VERSION_FILE" | tr -d '[:space:]')"
+[ -n "$CURRENT" ] || exit 0
+
+if [ "$MODE" = "record" ]; then
+  mkdir -p "$STATE_HOME" 2>/dev/null || exit 0
+  printf '%s\n' "$CURRENT" > "$STAMP" 2>/dev/null || true
+  exit 0
+fi
+
+INSTALLED=""
+[ -f "$STAMP" ] && INSTALLED="$(head -1 "$STAMP" | tr -d '[:space:]')"
+
+if [ "$MODE" = "status" ]; then
+  echo "checkout:  $CURRENT ($REPO_DIR)"
+  echo "installed: ${INSTALLED:-<never recorded>}"
+  exit 0
+fi
+
+# Never recorded: setup has not run against this checkout. Say so once; this is
+# the state a fresh clone is in, and it is worth a line.
+if [ -z "$INSTALLED" ]; then
+  echo "ArtStack: skills not installed from this checkout yet. Run ./setup"
+  exit 0
+fi
+
+if [ "$INSTALLED" != "$CURRENT" ]; then
+  echo "ArtStack: checkout is $CURRENT, installed skills are $INSTALLED. Re-run ./setup"
+fi
+exit 0

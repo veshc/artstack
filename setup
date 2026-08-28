@@ -1,30 +1,203 @@
 #!/usr/bin/env bash
-# ArtStack setup: copies commands and context templates into ~/.claude
-# Does nothing else. No network calls, no telemetry.
+# ArtStack setup - install the skills into Claude Code.
+#
+# Usage:
+#   ./setup                    install (or refresh) every ArtStack skill
+#   ./setup --prefix           install as artstack-<name> to avoid name clashes
+#   ./setup --init-context     create this repo's context files, then exit
+#   ./setup --uninstall        remove everything this script installed
+#   ./setup --check            report what is installed, change nothing
+#
+# What it does and does not do. It regenerates the skill files from their
+# templates, symlinks each skill into ~/.claude/skills/, records the version it
+# installed, and optionally seeds a repo's context files. It makes no network
+# calls, sends no telemetry, and checks for no updates. Everything it writes is
+# a symlink or a markdown file you can read.
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-CLAUDE_DIR="${HOME}/.claude"
+REPO_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+CLAUDE_SKILLS="${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}"
+STATE_HOME="${ARTSTACK_HOME:-$HOME/.artstack}"
+BANNER_MARK='Generated from SKILL.md.tmpl by ./build'
 
-echo "ArtStack setup"
-echo "Repo: ${REPO_DIR}"
+MODE="install"
+PREFIX=""
 
-mkdir -p "${CLAUDE_DIR}/commands/artstack"
-cp "${REPO_DIR}"/commands/*.md "${CLAUDE_DIR}/commands/artstack/"
-echo "Installed commands to ${CLAUDE_DIR}/commands/artstack/"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prefix) PREFIX="artstack-"; shift ;;
+    --no-prefix) PREFIX=""; shift ;;
+    --init-context) MODE="init-context"; shift ;;
+    --uninstall) MODE="uninstall"; shift ;;
+    --check) MODE="check"; shift ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "setup: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
 
-if [ ! -f "${REPO_DIR}/context/art.md" ]; then
-  cp "${REPO_DIR}/context/art.md.template" "${REPO_DIR}/context/art.md"
-  echo "Created context/art.md from template. Fill it in for your train."
+say() { printf '%s\n' "$*"; }
+
+# ── Context bootstrap ─────────────────────────────────────────
+# Context lives in the repo you are working in, not in this checkout. That is
+# the whole point: a train file committed next to the code is one a team shares
+# and reviews, and a `@context/art.md` include that resolves to nothing is the
+# bug this replaces.
+init_context() {
+  local target_root
+  target_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  local state="${ARTSTACK_STATE_DIR:-$target_root/.artstack}"
+
+  if [ "$target_root" = "$REPO_DIR" ]; then
+    say "You are inside the ArtStack checkout."
+    say "Run --init-context from your product repository instead, so the"
+    say "context files live with the code your team already shares."
+    exit 1
+  fi
+
+  mkdir -p "$state/teams"
+
+  if [ -f "$state/art.md" ]; then
+    say "  exists  $state/art.md"
+  else
+    cp "$REPO_DIR/context/art.md.template" "$state/art.md"
+    say "  created $state/art.md"
+  fi
+
+  if [ -f "$state/team.md" ] || [ -n "$(find "$state/teams" -name '*.md' -type f 2>/dev/null | head -1)" ]; then
+    say "  exists  team context"
+  else
+    cp "$REPO_DIR/context/team.md.template" "$state/team.md"
+    say "  created $state/team.md"
+  fi
+
+  say ""
+  say "Fill both in. Filled examples: $REPO_DIR/context/examples/"
+  say "Commit them so the whole team gets the same context."
+  say ""
+  say "More than one team in this repo? Put each team's file in"
+  say "  $state/teams/<team-name>.md"
+  say "and set the active one with a single line in $state/active-team"
+  say "(or pass --team <name>). One team per repo needs none of that."
+}
+
+if [ "$MODE" = "init-context" ]; then
+  init_context
+  exit 0
 fi
-if [ ! -f "${REPO_DIR}/context/team.md" ]; then
-  cp "${REPO_DIR}/context/team.md.template" "${REPO_DIR}/context/team.md"
-  echo "Created context/team.md from template. Fill it in for your team."
+
+# ── Provenance ────────────────────────────────────────────────
+# Only ever replace something ArtStack owns. ~/.claude/skills is a shared
+# namespace: a user's own directory that happens to match one of our names must
+# never be deleted by a setup re-run. A symlink is always safe to replace; a
+# real directory must carry our generated banner.
+owned_by_artstack() {
+  local dst="$1"
+  [ -e "$dst" ] || return 0
+  [ -L "$dst" ] && return 0
+  [ -d "$dst" ] || return 1
+  [ -f "$dst/SKILL.md" ] && grep -qF "$BANNER_MARK" "$dst/SKILL.md" 2>/dev/null
+}
+
+skill_dirs() {
+  find "$REPO_DIR/skills" -mindepth 1 -maxdepth 1 -type d | sort
+}
+
+if [ "$MODE" = "check" ]; then
+  say "ArtStack $(cat "$REPO_DIR/VERSION" 2>/dev/null || echo '?')  ($REPO_DIR)"
+  "$REPO_DIR/bin/artstack-version-check" --status 2>/dev/null || true
+  say ""
+  for d in $(skill_dirs); do
+    n="$(basename "$d")"
+    for cand in "$CLAUDE_SKILLS/$n" "$CLAUDE_SKILLS/artstack-$n"; do
+      if [ -L "$cand" ]; then
+        printf '  linked   %-24s -> %s\n' "$(basename "$cand")" "$(readlink "$cand")"
+      elif [ -d "$cand" ] && owned_by_artstack "$cand"; then
+        printf '  copied   %-24s\n' "$(basename "$cand")"
+      fi
+    done
+  done
+  exit 0
 fi
 
-echo ""
-echo "Next steps:"
-echo "  1. Fill in context/art.md and context/team.md (see context/examples/ for filled-in examples)"
-echo "  2. Add the include lines from CLAUDE.md to your project's CLAUDE.md, or copy it"
-echo "  3. Optional: configure Azure DevOps or Jira MCP (see integrations/)"
-echo "  4. Start with /pi-prep on a feature"
+if [ "$MODE" = "uninstall" ]; then
+  removed=0
+  for d in $(skill_dirs); do
+    n="$(basename "$d")"
+    for cand in "$CLAUDE_SKILLS/$n" "$CLAUDE_SKILLS/artstack-$n"; do
+      if [ -L "$cand" ] && [ "$(readlink "$cand")" = "$d" ]; then
+        rm -f "$cand"; removed=$((removed + 1))
+        say "  removed $(basename "$cand")"
+      elif [ -d "$cand" ] && owned_by_artstack "$cand"; then
+        rm -rf "$cand"; removed=$((removed + 1))
+        say "  removed $(basename "$cand")"
+      fi
+    done
+  done
+  rm -f "$STATE_HOME/installed-version" "$STATE_HOME/checkout-path"
+  say ""
+  say "Removed $removed skill link(s). Your repo context files were left alone."
+  say "Delete them yourself if you want them gone: <repo>/.artstack/"
+  exit 0
+fi
+
+# ── Install ───────────────────────────────────────────────────
+say "ArtStack setup"
+say "  checkout: $REPO_DIR"
+say "  version:  $(cat "$REPO_DIR/VERSION" 2>/dev/null || echo '?')"
+say ""
+
+# Always regenerate first so a `git pull` that changed a template or a shared
+# partial cannot leave a stale SKILL.md linked into Claude Code.
+if ! "$REPO_DIR/build" >/dev/null; then
+  echo "setup: build failed; not installing" >&2
+  exit 1
+fi
+
+mkdir -p "$CLAUDE_SKILLS" "$STATE_HOME"
+
+linked=0
+skipped=0
+collisions=()
+
+for d in $(skill_dirs); do
+  name="$(basename "$d")"
+  dst="$CLAUDE_SKILLS/${PREFIX}${name}"
+
+  # A foreign skill already owns this name. gstack ships /review too, and
+  # silently shadowing it would be a bug we introduced into someone's setup.
+  if ! owned_by_artstack "$dst"; then
+    collisions+=("$name")
+    dst="$CLAUDE_SKILLS/artstack-${name}"
+    if ! owned_by_artstack "$dst"; then
+      say "  SKIP    $name (both $name and artstack-$name are taken by something else)"
+      skipped=$((skipped + 1))
+      continue
+    fi
+  fi
+
+  rm -rf "$dst"
+  ln -snf "$d" "$dst"
+  linked=$((linked + 1))
+done
+
+printf '%s\n' "$REPO_DIR" > "$STATE_HOME/checkout-path"
+"$REPO_DIR/bin/artstack-version-check" --record 2>/dev/null || true
+
+say "  linked $linked skill(s) into $CLAUDE_SKILLS"
+[ "$skipped" -gt 0 ] && say "  skipped $skipped"
+
+if [ "${#collisions[@]}" -gt 0 ]; then
+  say ""
+  say "Name clash: ${collisions[*]}"
+  say "Another skill suite already owns those names, so ArtStack installed them"
+  say "as artstack-<name> instead. Both remain usable. Run ./setup --prefix to"
+  say "install every ArtStack skill that way for consistency."
+fi
+
+say ""
+say "Next:"
+say "  1. cd to your product repo and run: $REPO_DIR/setup --init-context"
+say "  2. Fill in .artstack/art.md and .artstack/team.md, then commit them"
+say "  3. Ask Claude Code to break down a feature, or run the router: /artstack"
+say ""
+say "Nothing here phones home. To update: git -C $REPO_DIR pull && $REPO_DIR/setup"
