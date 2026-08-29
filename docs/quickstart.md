@@ -24,14 +24,14 @@ From your product repository, not from the ArtStack checkout:
 
 ```bash
 cd /path/to/your/product/repo
-~/src/artstack/setup --init-context
+~/src/artstack/setup --init-context --team <your-team-name>
 ```
 
-That creates two files. Fill them in. This is where the value comes from; vague
-context produces vague output.
+That creates the train file and your team's file. Fill them in. This is where
+the value comes from; vague context produces vague output.
 
-- `.artstack/art.md`: PI dates and objectives, teams, cross-team dependencies, architectural runway, NFRs, definition of done. See `context/examples/art.example.md` for a filled-in model.
-- `.artstack/team.md`: your stack, test frameworks, work item conventions, review rules, cadence. See `context/examples/team.example.md`.
+- `.artstack/art.md`: PI dates and objectives, teams on the train, cross-team dependencies, architectural runway, NFRs, definition of done. One per repo, shared by every team. See `context/examples/art.example.md`.
+- `.artstack/teams/<your-team>.md`: your stack, test frameworks, work item conventions, review rules, cadence. See `context/examples/team.example.md`.
 
 Commit them. They belong with the code, and a teammate who installs ArtStack
 then gets your team's context for free.
@@ -41,8 +41,11 @@ these files at runtime and tells you which ones it found. If it reports
 `ART_FILE: none`, it says so at the top of its output rather than quietly
 running with no train context.
 
-A repository shared by several teams can keep one file per team in
-`.artstack/teams/<name>.md` with the active one named in `.artstack/active-team`.
+If several teams work in this repo, each gets a file under `.artstack/teams/`.
+The repo's default is named in `.artstack/active-team`; pass `--team <name>` to
+act as a different one for a single command. When several teams exist and
+nothing selects one, skills stop and ask rather than guessing — being filed
+against the wrong team's backlog is worse than being asked.
 
 Refresh `art.md` at every planning-interval boundary. Stale context is worse than no context because it is confidently wrong.
 

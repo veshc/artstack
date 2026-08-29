@@ -42,18 +42,25 @@ ArtStack reads a small context layer of plain markdown you own, living in the
 repository you are working in:
 
 ```
-<your repo>/.artstack/art.md     PI dates and objectives, teams, dependencies,
-                                 runway, NFRs, definition of done
-<your repo>/.artstack/team.md    your stack, test frameworks, norms, cadence
+<your repo>/.artstack/art.md            the train: PI dates and objectives, teams,
+                                        dependencies, runway, NFRs, DoD
+<your repo>/.artstack/teams/<name>.md   one per team: stack, test frameworks,
+                                        norms, cadence
+<your repo>/.artstack/active-team       this repo's default team
 ```
 
-Create them with `./setup --init-context`, run from your product repo, then
-commit them so the whole team shares one copy. Refresh `art.md` each planning
-interval.
+Create them with `./setup --init-context --team <name>`, run from your product
+repo, then commit them so every team on the train reads the same context.
+Refresh `art.md` each planning interval.
 
-Every skill reports which files it resolved and says so plainly when one is
-missing, rather than running with no context and not mentioning it. A repo
-shared by several teams can keep one file per team under `.artstack/teams/`.
+One train, many teams: the train file is singular and shared; each team has its
+own file. Team identity is explicit everywhere, because a story, a review and a
+dependency each belong to a specific team.
+
+Every skill reports which files it resolved, states which team it is acting as,
+and says so plainly when something is missing, rather than running with no
+context and not mentioning it. When several teams exist and none is selected, it
+asks instead of picking.
 
 ## Live work-item data
 

@@ -136,7 +136,54 @@ jobs:
           echo "$out" | grep -q "$proj/.artstack/art.md"  || { echo "wrong train file"; exit 1; }
           echo "$out" | grep -q "$proj/.artstack/team.md" || { echo "wrong team file"; exit 1; }
 
-      - name: Resolves a named team when several exist
+      # This is a train: several teams share one art.md and each has its own
+      # team file. Team identity has to resolve to a NAME, because everything
+      # recorded downstream is keyed by it.
+      - name: Scaffolds a named team on the train
+        run: |
+          proj="$RUNNER_TEMP/train"
+          mkdir -p "$proj" && cd "$proj"
+          git init -q . && git -c user.email=c@i -c user.name=ci commit -q --allow-empty -m init
+          "$GITHUB_WORKSPACE/setup" --init-context --team Falcon
+          test -f .artstack/teams/Falcon.md || { echo "team file not created"; exit 1; }
+          grep -q '^Falcon$' .artstack/active-team || { echo "active-team not set"; exit 1; }
+          out="$("$GITHUB_WORKSPACE/bin/artstack-context" --print)"
+          echo "$out"
+          echo "$out" | grep -q 'team      : Falcon' || { echo "team name unresolved"; exit 1; }
+
+      # Picking a team silently is how a review gets filed against the wrong
+      # team's backlog. Ambiguity must surface, not resolve itself.
+      - name: Several teams and no selection is AMBIGUOUS, never a guess
+        run: |
+          proj="$RUNNER_TEMP/train"
+          cd "$proj"
+          cp "$GITHUB_WORKSPACE/context/team.md.template" .artstack/teams/orion.md
+          rm .artstack/active-team
+          vars="$("$GITHUB_WORKSPACE/bin/artstack-context")"
+          echo "$vars"
+          echo "$vars" | grep -q 'ARTSTACK_TEAM_AMBIGUOUS=true' || { echo "ambiguity not reported"; exit 1; }
+          echo "$vars" | grep -q 'ARTSTACK_TEAM_NAME=$'         || { echo "guessed a team anyway"; exit 1; }
+          echo "$vars" | grep -q 'ARTSTACK_TEAMS_COUNT=2'       || { echo "team count wrong"; exit 1; }
+
+      - name: --team resolves the ambiguity
+        run: |
+          cd "$RUNNER_TEMP/train"
+          out="$("$GITHUB_WORKSPACE/bin/artstack-context" --team orion --print)"
+          echo "$out"
+          echo "$out" | grep -q 'teams/orion.md' || { echo "--team ignored"; exit 1; }
+          echo "$out" | grep -q 'via --team'     || { echo "source not reported"; exit 1; }
+
+      # A named team with no file must fail loudly rather than silently falling
+      # back to some other team's conventions.
+      - name: A named team with no file is reported, not substituted
+        run: |
+          cd "$RUNNER_TEMP/train"
+          vars="$("$GITHUB_WORKSPACE/bin/artstack-context" --team ghost)"
+          echo "$vars"
+          echo "$vars" | grep -q 'ARTSTACK_TEAM_MISSING=true' || { echo "missing team not reported"; exit 1; }
+          echo "$vars" | grep -q 'ARTSTACK_TEAM=$'            || { echo "fell back to another team"; exit 1; }
+
+      - name: Legacy single-team layout still resolves
         run: |
           proj="$RUNNER_TEMP/proj"
           cd "$proj"

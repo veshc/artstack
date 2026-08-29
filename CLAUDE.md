@@ -14,17 +14,28 @@ Context is now resolved at runtime by `bin/artstack-context`, from the
 repository you are actually working in:
 
 ```
-<your repo>/.artstack/art.md        the train
-<your repo>/.artstack/team.md       the team
-<your repo>/.artstack/teams/<n>.md  one file per team, when a repo has several
-<your repo>/.artstack/active-team   one line naming the team, when several exist
+<your repo>/.artstack/art.md        the train. One per repo, shared by every team.
+<your repo>/.artstack/teams/<n>.md  one file per team on the train.
+<your repo>/.artstack/team.md       shorthand for a repo owned by exactly one team.
+<your repo>/.artstack/active-team   one line naming this repo's default team.
 ```
 
-Create them with `path/to/artstack/setup --init-context`, run from your
-product repository. Commit them so the whole team shares one copy.
+Create them with `path/to/artstack/setup --init-context --team <name>`, run
+from your product repository. Commit them so every team on the train reads the
+same context.
 
-Every skill reports what it resolved (`ART_FILE:` and `TEAM_FILE:`) and says so
-plainly when either is missing, instead of pretending it had context.
+**One train, many teams.** The train file is singular: dates, objectives,
+cross-team dependencies, runway and NFRs are the same for everyone on it. Team
+identity is not optional metadata — a story, a review, a dependency and a demo
+segment all belong to a specific team, and everything ArtStack records is keyed
+by that name so it can be aggregated to the train later.
+
+Every skill reports what it resolved (`ART_FILE`, `TEAM`, `TEAM_FILE`) and says
+so plainly when something is missing, instead of pretending it had context.
+When several teams exist and nothing selects one, resolution reports
+`TEAM_AMBIGUOUS: true` and the skill must ask rather than pick: a review filed
+against the wrong team's backlog costs more to unpick than the question costs
+to ask.
 
 ## Working on ArtStack itself
 

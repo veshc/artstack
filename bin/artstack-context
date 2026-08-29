@@ -1,46 +1,58 @@
 #!/usr/bin/env bash
-# artstack-context - resolve this repo's ArtStack context files.
+# artstack-context - resolve the train and team context for this repo.
 #
 # Usage:
-#   eval "$(artstack-context)"     # sets ARTSTACK_ART / ARTSTACK_TEAM / ...
-#   artstack-context               # print the KEY=value lines
-#   artstack-context --print       # human-readable report of what resolved
+#   eval "$(artstack-context)"       # sets ARTSTACK_* vars
+#   artstack-context                 # print the KEY=value lines
+#   artstack-context --print         # human-readable report
+#   artstack-context --team <name>   # act as a named team
+#   artstack-context --list-teams    # every team this repo knows about
 #
 # Why this exists. The old wiring put `@context/art.md` in a CLAUDE.md that you
 # were told to copy into your project, while the files themselves stayed in the
-# ArtStack clone. The include resolved against your project root and silently
-# found nothing, so every command ran with no train context and never said so.
-# Resolution is done here, in one place, and commands report what they got.
+# ArtStack clone. The include resolved against your project root, silently
+# found nothing, and every command ran with no train context without saying so.
+# Resolution happens here, in one place, and commands report what they got.
 #
-# Search order for the train file (first hit wins):
-#   1. $ARTSTACK_ART                       explicit override
-#   2. <repo root>/.artstack/art.md        committed with the code (recommended)
-#   3. <repo root>/context/art.md          legacy in-repo location
-#   4. ~/.artstack/art.md                  personal fallback, not shared
+# The shape this assumes: one train, many teams. A release train has a single
+# art.md - the dates, objectives, cross-team dependencies, runway and NFRs are
+# the same for everyone on it - and one team file per team. Team identity is
+# not optional metadata: a story, a review, a dependency and a demo segment all
+# belong to a specific team, and everything ArtStack records has to be keyed
+# that way or it cannot be aggregated to the train later.
 #
-# Team files. A train has many teams, so the team file is resolved by name and
-# several may sit side by side. Order:
-#   1. $ARTSTACK_TEAM                      explicit override
-#   2. <state>/teams/$ARTSTACK_TEAM_NAME.md
-#   3. <state>/team.md                     single-team repo, the common case
-#   4. ~/.artstack/team.md
+#   .artstack/
+#     art.md                  the train. One per repo.
+#     teams/<name>.md         one file per team on the train.
+#     team.md                 shorthand for a repo owned by exactly one team.
+#     active-team             one line naming this repo's default team.
 #
-# $ARTSTACK_TEAM_NAME comes from --team, the env, or .artstack/active-team.
-# One team per repo is the normal case and needs no configuration; the teams/
-# directory exists so a repo shared by several teams on the same train does not
-# have to be restructured later.
+# Search order, train file (first hit wins):
+#   $ARTSTACK_ART -> <repo>/.artstack/art.md -> <repo>/context/art.md
+#   -> ~/.artstack/art.md
+#
+# Search order, team file:
+#   $ARTSTACK_TEAM -> <repo>/.artstack/teams/$NAME.md -> <repo>/.artstack/team.md
+#   -> <repo>/context/team.md -> ~/.artstack/team.md
+#
+# Team name resolution, in order: --team, $ARTSTACK_TEAM_NAME,
+# .artstack/active-team, the single file in teams/ when there is exactly one,
+# or team.md reduced to its heading. AMBIGUOUS when several teams exist and
+# nothing selects one - callers must surface that rather than pick.
 #
 # Nothing here reads the network and nothing is written outside the repo.
 set -euo pipefail
 
 PRINT=0
+LIST=0
 TEAM_ARG=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --print) PRINT=1; shift ;;
+    --list-teams) LIST=1; shift ;;
     --team) TEAM_ARG="${2:-}"; shift 2 ;;
-    --help|-h) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --help|-h) sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "artstack-context: unknown flag: $1" >&2; exit 2 ;;
   esac
 done
@@ -48,6 +60,7 @@ done
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 STATE_DIR="${ARTSTACK_STATE_DIR:-$REPO_ROOT/.artstack}"
 HOME_DIR="${HOME:-}"
+TEAMS_DIR="$STATE_DIR/teams"
 
 _first_existing() {
   for c in "$@"; do
@@ -56,6 +69,34 @@ _first_existing() {
   return 0
 }
 
+# Keep any name usable as a path segment so it can never escape teams/.
+_safe_name() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//; s/--*/-/g'
+}
+
+# ── Every team this repo knows about ──────────────────────────
+TEAMS_LIST=""
+TEAMS_COUNT=0
+if [ -d "$TEAMS_DIR" ]; then
+  TEAMS_LIST="$(find "$TEAMS_DIR" -maxdepth 1 -name '*.md' -type f 2>/dev/null \
+    | sed 's|.*/||; s|\.md$||' | sort | tr '\n' ',' | sed 's/,$//')"
+  [ -n "$TEAMS_LIST" ] && TEAMS_COUNT="$(printf '%s' "$TEAMS_LIST" | tr ',' '\n' | grep -c .)"
+fi
+
+if [ "$LIST" = "1" ]; then
+  if [ "$TEAMS_COUNT" -eq 0 ]; then
+    if [ -f "$STATE_DIR/team.md" ]; then
+      echo "1 team (single-team repo): $STATE_DIR/team.md"
+    else
+      echo "no team files found under $STATE_DIR"
+    fi
+  else
+    printf '%s teams on this train, in this repo:\n' "$TEAMS_COUNT"
+    printf '%s\n' "$TEAMS_LIST" | tr ',' '\n' | sed 's/^/  /'
+  fi
+  exit 0
+fi
+
 # ── Train file ────────────────────────────────────────────────
 ART="$(_first_existing \
   "${ARTSTACK_ART:-}" \
@@ -63,31 +104,47 @@ ART="$(_first_existing \
   "$REPO_ROOT/context/art.md" \
   "${HOME_DIR:+$HOME_DIR/.artstack/art.md}")"
 
-# ── Active team name ──────────────────────────────────────────
-TEAM_NAME="$TEAM_ARG"
-if [ -z "$TEAM_NAME" ] && [ -n "${ARTSTACK_TEAM_NAME:-}" ]; then
-  TEAM_NAME="$ARTSTACK_TEAM_NAME"
+# ── Team identity ─────────────────────────────────────────────
+# AMBIGUOUS is a real state and is reported, never guessed away. Picking a team
+# silently is how a review gets filed against the wrong team's backlog.
+TEAM_NAME=""
+TEAM_SOURCE=""
+
+if [ -n "$TEAM_ARG" ]; then
+  TEAM_NAME="$(_safe_name "$TEAM_ARG")"; TEAM_SOURCE="--team"
+elif [ -n "${ARTSTACK_TEAM_NAME:-}" ]; then
+  TEAM_NAME="$(_safe_name "$ARTSTACK_TEAM_NAME")"; TEAM_SOURCE="env"
+elif [ -f "$STATE_DIR/active-team" ]; then
+  TEAM_NAME="$(_safe_name "$(head -1 "$STATE_DIR/active-team" | tr -d '\r')")"
+  TEAM_SOURCE="active-team"
+elif [ "$TEAMS_COUNT" -eq 1 ]; then
+  TEAM_NAME="$TEAMS_LIST"; TEAM_SOURCE="only-team"
+elif [ "$TEAMS_COUNT" -eq 0 ] && [ -f "$STATE_DIR/team.md" ]; then
+  # Single-team repo. Name it from the file's heading so downstream records are
+  # still keyed by a team, not by "the team file".
+  TEAM_NAME="$(_safe_name "$(sed -n 's/^#[[:space:]]*Team context:[[:space:]]*//p' "$STATE_DIR/team.md" | head -1)")"
+  [ -n "$TEAM_NAME" ] || TEAM_NAME="unnamed-team"
+  TEAM_SOURCE="team.md"
 fi
-if [ -z "$TEAM_NAME" ] && [ -f "$STATE_DIR/active-team" ]; then
-  # Single line, trimmed. Anything else is ignored rather than trusted.
-  TEAM_NAME="$(head -1 "$STATE_DIR/active-team" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+
+TEAM_AMBIGUOUS="false"
+if [ -z "$TEAM_NAME" ] && [ "$TEAMS_COUNT" -gt 1 ]; then
+  TEAM_AMBIGUOUS="true"
 fi
-# Keep the name usable as a path segment; never let it escape the teams dir.
-TEAM_NAME="$(printf '%s' "$TEAM_NAME" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//')"
 
 TEAM="$(_first_existing \
   "${ARTSTACK_TEAM:-}" \
-  "${TEAM_NAME:+$STATE_DIR/teams/$TEAM_NAME.md}" \
+  "${TEAM_NAME:+$TEAMS_DIR/$TEAM_NAME.md}" \
   "$STATE_DIR/team.md" \
   "$REPO_ROOT/context/team.md" \
   "${HOME_DIR:+$HOME_DIR/.artstack/team.md}")"
 
-# Every team file this repo can see, so a command can say "you have four teams
-# and did not say which" instead of silently picking one.
-TEAMS_AVAILABLE=""
-if [ -d "$STATE_DIR/teams" ]; then
-  TEAMS_AVAILABLE="$(find "$STATE_DIR/teams" -maxdepth 1 -name '*.md' -type f 2>/dev/null \
-    | sed 's|.*/||; s|\.md$||' | sort | tr '\n' ',' | sed 's/,$//')"
+# A named team whose file is missing is an error worth naming, not a silent
+# fallback to some other team's context.
+TEAM_MISSING="false"
+if [ -n "$TEAM_NAME" ] && [ "$TEAMS_COUNT" -gt 0 ] && [ ! -f "$TEAMS_DIR/$TEAM_NAME.md" ]; then
+  TEAM_MISSING="true"
+  TEAM=""
 fi
 
 if [ "$PRINT" = "1" ]; then
@@ -95,15 +152,28 @@ if [ "$PRINT" = "1" ]; then
   echo "  repo root : $REPO_ROOT"
   echo "  state dir : $STATE_DIR"
   if [ -n "$ART" ]; then echo "  train     : $ART"
-  else echo "  train     : NOT FOUND (run ./setup --init-context from your repo)"; fi
-  if [ -n "$TEAM" ]; then echo "  team      : $TEAM"
-  else echo "  team      : NOT FOUND (run ./setup --init-context from your repo)"; fi
-  [ -n "$TEAMS_AVAILABLE" ] && echo "  teams     : $TEAMS_AVAILABLE"
+  else echo "  train     : NOT FOUND (run setup --init-context from your repo)"; fi
+  if [ "$TEAM_AMBIGUOUS" = "true" ]; then
+    echo "  team      : AMBIGUOUS - $TEAMS_COUNT teams and none selected"
+    echo "              pick one with --team <name>, or set .artstack/active-team"
+  elif [ "$TEAM_MISSING" = "true" ]; then
+    echo "  team      : NOT FOUND - '$TEAM_NAME' has no file in teams/"
+  elif [ -n "$TEAM" ]; then
+    echo "  team      : ${TEAM_NAME:-unnamed} ($TEAM)"
+    echo "  selected  : via $TEAM_SOURCE"
+  else
+    echo "  team      : NOT FOUND (run setup --init-context from your repo)"
+  fi
+  [ -n "$TEAMS_LIST" ] && echo "  teams     : $TEAMS_LIST ($TEAMS_COUNT on this train)"
   exit 0
 fi
 
 printf 'ARTSTACK_ART=%s\n' "$ART"
 printf 'ARTSTACK_TEAM=%s\n' "$TEAM"
 printf 'ARTSTACK_TEAM_NAME=%s\n' "$TEAM_NAME"
-printf 'ARTSTACK_TEAMS_AVAILABLE=%s\n' "$TEAMS_AVAILABLE"
+printf 'ARTSTACK_TEAM_SOURCE=%s\n' "$TEAM_SOURCE"
+printf 'ARTSTACK_TEAM_AMBIGUOUS=%s\n' "$TEAM_AMBIGUOUS"
+printf 'ARTSTACK_TEAM_MISSING=%s\n' "$TEAM_MISSING"
+printf 'ARTSTACK_TEAMS=%s\n' "$TEAMS_LIST"
+printf 'ARTSTACK_TEAMS_COUNT=%s\n' "$TEAMS_COUNT"
 printf 'ARTSTACK_CONTEXT_REPO_ROOT=%s\n' "$REPO_ROOT"
