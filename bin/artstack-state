@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# artstack-state - resolve ArtStack state paths for the current repo.
+#
+# Usage:
+#   eval "$(artstack-state)"            # exports ARTSTACK_* vars
+#   artstack-state --ensure             # same, and creates the directories
+#   artstack-state --key <item-id>      # also resolves ARTSTACK_KEY for an item
+#   artstack-state --path               # print the state dir only
+#
+# State layout (all plain files, all in your repo, all readable):
+#
+#   .artstack/
+#     artifacts/<key>/<command>-<timestamp>.md   command output, chainable
+#     ledger/<branch>.jsonl                      one record per command run
+#     evidence/<branch>.jsonl                    test-run receipts
+#     train/state.json                           train state (see artstack-train)
+#
+# <key> is the work item id when a command was given one, otherwise the branch
+# name. Item keys are what make the chain work: /pi-prep 12345 writes where
+# /arch-runway 12345 looks.
+#
+# Location: <repo root>/.artstack by default, so a team shares one copy through
+# the repo they already share. Override with ARTSTACK_STATE_DIR if your train
+# keeps this outside the product repo. Nothing here leaves your machine.
+set -euo pipefail
+
+ENSURE=0
+KEY_IN=""
+PATH_ONLY=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ensure) ENSURE=1; shift ;;
+    --key) KEY_IN="${2:-}"; shift 2 ;;
+    --path) PATH_ONLY=1; shift ;;
+    --help|-h) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "artstack-state: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+# Sanitize any string into a safe path segment. Keeps letters, digits, dot,
+# dash and underscore; everything else becomes a dash. Empty input is rejected
+# by the caller, never silently turned into a directory named "".
+_safe() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//; s/--*/-/g'
+}
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$REPO_ROOT" ]; then
+  REPO_ROOT="$(pwd)"
+  IN_GIT="false"
+else
+  IN_GIT="true"
+fi
+
+STATE_DIR="${ARTSTACK_STATE_DIR:-$REPO_ROOT/.artstack}"
+
+BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "no-branch")"
+[ -n "$BRANCH" ] || BRANCH="no-branch"
+BRANCH_SAFE="$(_safe "$BRANCH")"
+[ -n "$BRANCH_SAFE" ] || BRANCH_SAFE="no-branch"
+
+if [ -n "$KEY_IN" ]; then
+  KEY="$(_safe "$KEY_IN")"
+  [ -n "$KEY" ] || KEY="$BRANCH_SAFE"
+else
+  KEY="$BRANCH_SAFE"
+fi
+
+# Team identity, resolved by artstack-context (Stage 1). This is the dimension
+# that makes a record rollable-up to the train: a story, a review and a demo
+# segment each belong to one team, and a ledger that cannot say which team
+# produced a record cannot be aggregated across the ART later. Empty is a
+# legitimate value - a repo with no team context still logs - and consumers
+# render it as "-" rather than guessing.
+TEAM_NAME=""
+if [ -x "$SCRIPT_DIR/artstack-context" ]; then
+  TEAM_NAME="$(
+    eval "$("$SCRIPT_DIR/artstack-context" 2>/dev/null || true)" >/dev/null 2>&1
+    printf '%s' "${ARTSTACK_TEAM_NAME:-}"
+  )"
+fi
+
+if [ "$PATH_ONLY" = "1" ]; then
+  printf '%s\n' "$STATE_DIR"
+  exit 0
+fi
+
+if [ "$ENSURE" = "1" ]; then
+  mkdir -p "$STATE_DIR/artifacts/$KEY" "$STATE_DIR/ledger" \
+           "$STATE_DIR/evidence" "$STATE_DIR/train"
+
+  # The ledger, artifacts and evidence records are team truth and belong in the
+  # repo. Raw test logs do not: they hold whatever your suite printed, which is
+  # the one place in here a stack trace or a connection string turns up. They
+  # stay on the machine that ran them.
+  if [ ! -f "$STATE_DIR/.gitignore" ]; then
+    cat > "$STATE_DIR/.gitignore" <<'IGNORE_EOF'
+# Raw test output from artstack-evidence. Machine-local by design: these hold
+# whatever your suite printed. The receipts in evidence/*.jsonl are shared; the
+# logs they point at are not.
+evidence/logs/
+IGNORE_EOF
+  fi
+
+  if [ ! -f "$STATE_DIR/README.md" ]; then
+    cat > "$STATE_DIR/README.md" <<'README_EOF'
+# .artstack
+
+ArtStack state for this repo. Everything here is plain text you can read.
+
+    artifacts/<key>/    command output, so one command can read the last one's
+    ledger/<branch>     one JSONL record per command run
+    evidence/<branch>   test-run receipts (logs alongside are machine-local)
+    train/              train state
+
+`<key>` is a work item id when the command was given one, otherwise the branch.
+
+Commit this directory if your team wants shared history. Delete any of it at
+any time; commands recreate what they need and simply report less until then.
+Nothing here is sent anywhere.
+README_EOF
+  fi
+fi
+
+# Values are emitted shell-quoted (printf %q) because every consumer runs
+# `eval "$(artstack-state)"`. With a bare %s, a repo checked out to a path
+# containing a space - "/Users/me/My Projects/app" - word-splits during eval
+# and every consumer silently gets an empty or truncated path. That is not
+# hypothetical: it broke every helper in this directory before this line
+# changed. Callers should still quote their expansions ("$ARTSTACK_LEDGER")
+# for the same reason any path variable needs quoting.
+printf 'ARTSTACK_STATE_DIR=%q\n' "$STATE_DIR"
+printf 'ARTSTACK_REPO_ROOT=%q\n' "$REPO_ROOT"
+printf 'ARTSTACK_IN_GIT=%q\n' "$IN_GIT"
+printf 'ARTSTACK_BRANCH=%q\n' "$BRANCH"
+printf 'ARTSTACK_BRANCH_SAFE=%q\n' "$BRANCH_SAFE"
+printf 'ARTSTACK_KEY=%q\n' "$KEY"
+printf 'ARTSTACK_TEAM_NAME=%q\n' "$TEAM_NAME"
+printf 'ARTSTACK_LEDGER=%q\n' "$STATE_DIR/ledger/$BRANCH_SAFE.jsonl"
+printf 'ARTSTACK_EVIDENCE=%q\n' "$STATE_DIR/evidence/$BRANCH_SAFE.jsonl"
+printf 'ARTSTACK_ARTIFACTS=%q\n' "$STATE_DIR/artifacts/$KEY"
+printf 'ARTSTACK_TRAIN=%q\n' "$STATE_DIR/train"
+printf 'ARTSTACK_STATE_PROTO=1\n'

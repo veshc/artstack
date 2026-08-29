@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# artstack-log - append one record to the ArtStack command ledger.
+#
+# Usage:
+#   artstack-log command=arch-runway item=12345 verdict=LOCKED blockers=0
+#   artstack-log command=review verdict=REQUEST_CHANGES findings=3 item=PORTAL-99
+#
+# Takes key=value pairs. Values are written as JSON strings except for values
+# that are a bare integer or true/false, which are written unquoted so they can
+# be compared numerically later.
+#
+# Binding fields are stamped here and here only. Caller-supplied values for
+# ts, branch, commit, wtree, dirty and actor are dropped before stamping, so a
+# stale command template or a hand-edited record cannot bind itself to content
+# it was not made on.
+#
+#   ts      ISO-8601 UTC time of the append
+#   team    the team this record belongs to (from artstack-context)
+#   branch  current branch
+#   commit  current HEAD
+#   wtree   working-tree content fingerprint (see artstack-wtree)
+#   dirty   whether tracked files were modified at append time
+#   actor   git user.name <user.email>, so a record says who ran it
+#
+# `actor` is the human-assignment slot. It is recorded always and enforced
+# never. Sign-off gates activate only when context/team.md declares named
+# roles; see docs/adoption.md.
+#
+# The ledger is append-only JSONL, one file per branch, plain text, readable
+# with `cat`. Nothing leaves your machine.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [ $# -eq 0 ]; then
+  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+  exit 2
+fi
+
+eval "$("$SCRIPT_DIR/artstack-state" --ensure)"
+
+# JSON-escape a string value. Strips control characters and newlines so one
+# record is always exactly one line.
+_esc() {
+  printf '%s' "$1" \
+    | tr -d '\000-\010\013\014\016-\037' \
+    | tr '\n\r\t' '   ' \
+    | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# Keys that are always JSON strings, even when the value looks numeric. Work
+# item ids are the reason: a numeric ADO id like 12345 written as a bare number
+# does not match a string lookup, so /arch-runway 12345 would silently fail to
+# find what /pi-prep 12345 logged.
+_is_always_string() {
+  case "$1" in
+    item|verdict|command|version|iteration|pi|actor|artifact|label) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# True when the value should be emitted unquoted (integer or boolean).
+#
+# This must be exact. The earlier form allowed any string of digits and dashes,
+# so `range=1-2` and `weird=--` were emitted bare and produced a syntactically
+# invalid record: {"range":1-2}. One malformed line poisons the whole ledger
+# for any strict parser, and the ledger is append-only, so the damage is
+# permanent. Accept only a genuine JSON integer: an optional single leading
+# minus followed by at least one digit, with no other minus anywhere.
+_is_bare() {
+  case "$1" in
+    true|false) return 0 ;;
+    -*)
+      case "${1#-}" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+      esac
+      ;;
+    ''|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# Fields the caller is not allowed to set. Bound fields are stamped from the
+# real environment so a stale template or a hand-edited record cannot claim a
+# binding it does not have. `team` is bound for the same reason: a record
+# labelled with the wrong team is worse than one with no team at all, because
+# it silently corrupts any roll-up across the train.
+_is_bound_field() {
+  case "$1" in
+    ts|branch|commit|wtree|dirty|actor|team) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+BODY=""
+SAW_COMMAND=0
+for pair in "$@"; do
+  case "$pair" in
+    *=*) ;;
+    *) echo "artstack-log: expected key=value, got '$pair'" >&2; exit 2 ;;
+  esac
+  k="${pair%%=*}"
+  v="${pair#*=}"
+  case "$k" in
+    ''|*[!A-Za-z0-9_]*) echo "artstack-log: bad key '$k'" >&2; exit 2 ;;
+  esac
+  if _is_bound_field "$k"; then
+    continue  # silently dropped, stamped below from the real environment
+  fi
+  [ "$k" = "command" ] && SAW_COMMAND=1
+  if _is_always_string "$k"; then
+    BODY="$BODY,\"$k\":\"$(_esc "$v")\""
+  elif _is_bare "$v"; then
+    BODY="$BODY,\"$k\":$v"
+  else
+    BODY="$BODY,\"$k\":\"$(_esc "$v")\""
+  fi
+done
+
+if [ "$SAW_COMMAND" = "0" ]; then
+  echo "artstack-log: a record needs command=<name>" >&2
+  exit 2
+fi
+
+TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
+WTREE=""
+DIRTY=""
+if [ -n "$COMMIT" ]; then
+  WTREE="$("$SCRIPT_DIR/artstack-wtree" 2>/dev/null || true)"
+  if [ -n "$(git status --porcelain -uno 2>/dev/null | head -1)" ]; then
+    DIRTY="true"
+  else
+    DIRTY="false"
+  fi
+fi
+
+ACTOR_NAME="$(git config user.name 2>/dev/null || true)"
+ACTOR_EMAIL="$(git config user.email 2>/dev/null || true)"
+ACTOR=""
+if [ -n "$ACTOR_NAME" ] && [ -n "$ACTOR_EMAIL" ]; then
+  ACTOR="$ACTOR_NAME <$ACTOR_EMAIL>"
+elif [ -n "$ACTOR_NAME" ]; then
+  ACTOR="$ACTOR_NAME"
+fi
+
+REC="{\"ts\":\"$TS\",\"branch\":\"$(_esc "$ARTSTACK_BRANCH")\""
+[ -n "${ARTSTACK_TEAM_NAME:-}" ] && REC="$REC,\"team\":\"$(_esc "$ARTSTACK_TEAM_NAME")\""
+[ -n "$COMMIT" ] && REC="$REC,\"commit\":\"$COMMIT\""
+[ -n "$WTREE" ]  && REC="$REC,\"wtree\":\"$WTREE\""
+[ -n "$DIRTY" ]  && REC="$REC,\"dirty\":$DIRTY"
+[ -n "$ACTOR" ]  && REC="$REC,\"actor\":\"$(_esc "$ACTOR")\""
+REC="$REC$BODY}"
+
+printf '%s\n' "$REC" >> "$ARTSTACK_LEDGER"
+printf 'LOGGED: %s\n' "$ARTSTACK_LEDGER"

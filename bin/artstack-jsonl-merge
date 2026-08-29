@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# artstack-jsonl-merge - git merge driver for append-only JSONL.
+#
+# Adapted from gstack's bin/gstack-jsonl-merge (MIT, Copyright (c) Garry Tan).
+# gstack built this so one person could append from several machines. On a
+# train the same conflict happens for a better reason: two engineers on one
+# team both ran a command and both appended to the shared ledger.
+#
+# Called by git, not by you. Register it once per repo:
+#   artstack-jsonl-merge --install
+#
+# Behavior: concatenate base, ours and theirs, drop exact duplicate lines,
+# sort by the ISO `ts` field so the ledger stays chronological, and write the
+# result to <ours>. Both sides survive. Nobody loses a record to a conflict
+# marker, and nobody resolves a ledger conflict by hand and silently picks one.
+set -euo pipefail
+
+if [ "${1:-}" = "--install" ]; then
+  ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -z "$ROOT" ]; then
+    echo "artstack-jsonl-merge: not in a git repository" >&2
+    exit 1
+  fi
+  SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  git config merge.artstack-jsonl.name "ArtStack append-only JSONL merge"
+  git config merge.artstack-jsonl.driver "$SELF %O %A %B"
+
+  ATTR="$ROOT/.gitattributes"
+  if ! grep -q "artstack-jsonl" "$ATTR" 2>/dev/null; then
+    {
+      echo ""
+      echo "# ArtStack ledgers are append-only. Merge by union, never by conflict."
+      echo ".artstack/**/*.jsonl merge=artstack-jsonl"
+    } >> "$ATTR"
+    echo "Registered driver and added the .gitattributes rule."
+  else
+    echo "Registered driver. The .gitattributes rule was already present."
+  fi
+  exit 0
+fi
+
+if [ "$#" -lt 3 ]; then
+  echo "artstack-jsonl-merge: expected 3 args (base ours theirs), got $#" >&2
+  exit 1
+fi
+
+BASE="$1"; OURS="$2"; THEIRS="$3"
+
+TMP="$(mktemp "${TMPDIR:-/tmp}/artstack-jsonl-XXXXXX")"
+trap 'rm -f "$TMP" "$TMP.sorted"' EXIT
+
+# Union of all three sides, exact duplicates collapsed.
+cat "$BASE" "$OURS" "$THEIRS" 2>/dev/null | grep -v '^[[:space:]]*$' | sort -u > "$TMP" || true
+
+# Stable chronological order: extract ts as a sort key, sort, strip the key.
+# Records with no ts sort last, keeping their relative order deterministic via
+# the content sort already applied.
+awk '
+{
+  ts = ""
+  if (match($0, /"ts"[ ]*:[ ]*"[^"]*"/)) {
+    s = substr($0, RSTART, RLENGTH)
+    if (match(s, /"[^"]*"$/)) ts = substr(s, RSTART + 1, RLENGTH - 2)
+  }
+  if (ts == "") ts = "9999-99-99T99:99:99Z"
+  printf "%s\t%s\n", ts, $0
+}' "$TMP" | sort -s -k1,1 | cut -f2- > "$TMP.sorted"
+
+mv "$TMP.sorted" "$OURS"
+exit 0

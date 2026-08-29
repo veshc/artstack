@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# artstack-preflight - refuse to write when someone else is writing too.
+#
+# Usage:
+#   artstack-preflight              # report; exit 0 clean, 1 unsafe
+#   artstack-preflight --quiet      # exit code only
+#   artstack-preflight --warn-only  # always exit 0, still print findings
+#
+# Why this exists. Two agents once shared this working tree. One was told to do
+# read-only analysis and instead wrote twelve files into bin/, edited two of
+# them mid-run, and committed them onto the branch the other was using. The
+# other came within one `git add -A` of committing half-written files from a
+# session it could not see, under its own commit message.
+#
+# Nothing in the repo made that visible, so nothing stopped it. This does.
+#
+# What it checks:
+#   1. Foreign staged content - something is in the index that this process did
+#      not put there. The single most dangerous state, because `git commit`
+#      would take it silently.
+#   2. A live git operation - rebase, merge, cherry-pick or bisect in progress.
+#   3. A tree that changed underneath us since the marker was taken, which is
+#      how a concurrent writer shows up mid-run.
+#   4. Another artstack process holding the lock.
+#
+# What it deliberately does not do: block on a merely dirty tree. Uncommitted
+# work is the normal state of a working tree and refusing to run in one would
+# make the tool useless. The danger is not dirt, it is dirt you did not make.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+QUIET=0
+WARN_ONLY=0
+MARK=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --quiet) QUIET=1; shift ;;
+    --warn-only) WARN_ONLY=1; shift ;;
+    --mark) MARK="mark"; shift ;;
+    --since) MARK="since"; SINCE="${2:-}"; shift 2 ;;
+    --help|-h) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "artstack-preflight: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+say() { [ "$QUIET" = "1" ] || printf '%s\n' "$*"; }
+
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  say "PREFLIGHT: not a git repo - no concurrency checks available"
+  exit 0
+fi
+
+TOP="$(git rev-parse --show-toplevel)"
+GITDIR="$(git rev-parse --git-dir)"
+case "$GITDIR" in /*) ;; *) GITDIR="$TOP/$GITDIR" ;; esac
+
+# --mark prints a fingerprint the caller stashes before doing work; --since
+# compares against it. This is how a long-running command detects that the tree
+# moved under it between start and finish.
+if [ "$MARK" = "mark" ]; then
+  "$SCRIPT_DIR/artstack-wtree" 2>/dev/null || echo "no-wtree"
+  exit 0
+fi
+
+FINDINGS=0
+note() { FINDINGS=$((FINDINGS + 1)); say "  ! $*"; }
+
+if [ "$MARK" = "since" ]; then
+  NOW="$("$SCRIPT_DIR/artstack-wtree" 2>/dev/null || echo "no-wtree")"
+  if [ -n "${SINCE:-}" ] && [ "$SINCE" != "no-wtree" ] && [ "$NOW" != "$SINCE" ]; then
+    say "PREFLIGHT: UNSAFE"
+    note "the working tree changed while this command was running"
+    say "    at start: $SINCE"
+    say "    now:      $NOW"
+    say ""
+    say "  Something else wrote to this tree mid-run. Do not commit: you would"
+    say "  be committing changes you did not make. Find the other writer first."
+    [ "$WARN_ONLY" = "1" ] && exit 0
+    exit 1
+  fi
+  say "PREFLIGHT: tree unchanged since mark"
+  exit 0
+fi
+
+say "PREFLIGHT: $TOP"
+
+# 1. Staged content. `git commit` takes the index, so anything staged that we
+#    did not stage is the direct path to committing someone else's work.
+STAGED="$(git diff --cached --name-only 2>/dev/null | head -20 || true)"
+if [ -n "$STAGED" ]; then
+  COUNT="$(printf '%s\n' "$STAGED" | grep -c . || true)"
+  note "$COUNT path(s) already staged in the index:"
+  printf '%s\n' "$STAGED" | sed 's/^/      /' | { [ "$QUIET" = "1" ] || cat; }
+  say "    If you did not stage these, another session did. Never run"
+  say "    'git add -A' here - inspect and reset first."
+fi
+
+# 2. A git operation already in flight.
+for op in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD BISECT_LOG REVERT_HEAD; do
+  if [ -e "$GITDIR/$op" ]; then
+    note "a git operation is in progress ($op) - finish or abort it first"
+  fi
+done
+
+# 3. Another artstack process. Advisory only: a stale lock from a killed
+#    process must not wedge the tool forever, so it reports rather than blocks
+#    and says how old it is.
+LOCK="$GITDIR/artstack-preflight.lock"
+if [ -f "$LOCK" ]; then
+  OWNER="$(head -1 "$LOCK" 2>/dev/null || echo unknown)"
+  OWNER_PID="${OWNER%% *}"
+  if [ -n "$OWNER_PID" ] && kill -0 "$OWNER_PID" 2>/dev/null && [ "$OWNER_PID" != "$$" ]; then
+    note "another artstack process is live in this repo: $OWNER"
+  fi
+fi
+
+# 4. Index lock, which means a git command is running right now.
+if [ -f "$GITDIR/index.lock" ]; then
+  note "git index.lock exists - a git command is running in this repo now"
+fi
+
+if [ "$FINDINGS" -eq 0 ]; then
+  say "PREFLIGHT: clean - nothing staged, no operation in flight, no other writer"
+  exit 0
+fi
+
+say ""
+if [ "$WARN_ONLY" = "1" ]; then
+  say "PREFLIGHT: $FINDINGS finding(s) - continuing because --warn-only was given"
+  exit 0
+fi
+say "PREFLIGHT: UNSAFE - $FINDINGS finding(s). Resolve before writing."
+exit 1

@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# artstack-artifact - save and find command output so commands can chain.
+#
+# This is the substrate the chain runs on. /pi-prep saves here, /arch-runway
+# looks here, /test-plan looks at what /arch-runway saved. Before this existed
+# the commands referred to each other's output and nothing ever wrote any.
+#
+# Usage:
+#   artstack-artifact save --command pi-prep --item 12345 < output.md
+#   artstack-artifact save --command review --file review.md
+#   artstack-artifact latest --command pi-prep --item 12345    # prints a path
+#   artstack-artifact show   --command pi-prep --item 12345    # prints content
+#   artstack-artifact list [--item 12345]
+#
+# `latest` and `show` exit 3 when nothing is found. That is a normal result,
+# not an error: it means this is the first command in the chain for this item.
+# Callers branch on exit 3 rather than treating it as a failure.
+#
+# Files are markdown with a short provenance header, stored under
+# .artstack/artifacts/<key>/. Read them with any editor. Delete them freely;
+# nothing depends on them existing.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+ACTION="${1:-}"
+[ $# -gt 0 ] && shift || true
+
+COMMAND=""
+ITEM=""
+FILE=""
+TITLE=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --command) COMMAND="${2:-}"; shift 2 ;;
+    --item) ITEM="${2:-}"; shift 2 ;;
+    --file) FILE="${2:-}"; shift 2 ;;
+    --title) TITLE="${2:-}"; shift 2 ;;
+    --help|-h) ACTION="--help"; shift ;;
+    *) echo "artstack-artifact: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ -z "$ACTION" ] || [ "$ACTION" = "--help" ] || [ "$ACTION" = "-h" ]; then
+  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+fi
+
+if [ -n "$ITEM" ]; then
+  eval "$("$SCRIPT_DIR/artstack-state" --key "$ITEM")"
+else
+  eval "$("$SCRIPT_DIR/artstack-state")"
+fi
+
+_need_command() {
+  if [ -z "$COMMAND" ]; then
+    echo "artstack-artifact: --command is required for '$ACTION'" >&2
+    exit 2
+  fi
+  case "$COMMAND" in
+    ''|*[!a-z0-9-]*) echo "artstack-artifact: bad --command '$COMMAND'" >&2; exit 2 ;;
+  esac
+}
+
+case "$ACTION" in
+  save)
+    _need_command
+    mkdir -p "$ARTSTACK_ARTIFACTS"
+    STAMP="$(date -u +%Y%m%d-%H%M%S)"
+    OUT="$ARTSTACK_ARTIFACTS/$COMMAND-$STAMP.md"
+
+    COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo "none")"
+    WTREE="$("$SCRIPT_DIR/artstack-wtree" 2>/dev/null || echo "none")"
+
+    {
+      echo "<!-- artstack-artifact"
+      echo "command: $COMMAND"
+      [ -n "$ITEM" ] && echo "item: $ITEM"
+      echo "branch: $ARTSTACK_BRANCH"
+      echo "commit: $COMMIT"
+      echo "wtree: $WTREE"
+      echo "written: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      [ -n "$TITLE" ] && echo "title: $TITLE"
+      echo "-->"
+      echo ""
+      if [ -n "$FILE" ]; then
+        if [ ! -f "$FILE" ]; then
+          echo "artstack-artifact: no such file: $FILE" >&2
+          exit 1
+        fi
+        cat "$FILE"
+      else
+        cat
+      fi
+    } > "$OUT"
+
+    printf 'SAVED: %s\n' "$OUT"
+    ;;
+
+  latest)
+    _need_command
+    [ -d "$ARTSTACK_ARTIFACTS" ] || exit 3
+    FOUND="$(ls -1 "$ARTSTACK_ARTIFACTS"/"$COMMAND"-*.md 2>/dev/null | sort | tail -1 || true)"
+    [ -n "$FOUND" ] || exit 3
+    printf '%s\n' "$FOUND"
+    ;;
+
+  show)
+    _need_command
+    [ -d "$ARTSTACK_ARTIFACTS" ] || exit 3
+    FOUND="$(ls -1 "$ARTSTACK_ARTIFACTS"/"$COMMAND"-*.md 2>/dev/null | sort | tail -1 || true)"
+    [ -n "$FOUND" ] || exit 3
+    cat "$FOUND"
+    ;;
+
+  list)
+    if [ -n "$ITEM" ]; then
+      DIRS="$ARTSTACK_ARTIFACTS"
+    else
+      DIRS="$(ls -1d "$ARTSTACK_STATE_DIR"/artifacts/*/ 2>/dev/null || true)"
+    fi
+    [ -n "$DIRS" ] || { echo "No artifacts yet."; exit 0; }
+    for d in $DIRS; do
+      [ -d "$d" ] || continue
+      key="$(basename "$d")"
+      files="$(ls -1 "$d"/*.md 2>/dev/null || true)"
+      [ -n "$files" ] || continue
+      echo "$key/"
+      for f in $files; do
+        printf '  %s\n' "$(basename "$f")"
+      done
+    done
+    ;;
+
+  *)
+    echo "artstack-artifact: unknown action '$ACTION' (save|latest|show|list)" >&2
+    exit 2
+    ;;
+esac

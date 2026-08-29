@@ -125,6 +125,18 @@ render() {
 
 [ -d "$SKILLS" ] || fail "no skills/ directory at $SKILLS"
 
+# Concurrency guard. A real build rewrites tracked files, so refuse to run when
+# something else is mid-write in this tree. --dry-run reads only and is always
+# safe, so it skips the check and stays usable in CI and in a dirty tree.
+if [ "$DRY_RUN" = "0" ] && [ "$LIST" = "0" ] && [ -x "$ROOT/bin/artstack-preflight" ]; then
+  if ! "$ROOT/bin/artstack-preflight" ${ARTSTACK_PREFLIGHT_WARN:+--warn-only}; then
+    echo ""
+    echo "build: refusing to write while this tree is unsafe."
+    echo "Resolve the findings above, or set ARTSTACK_PREFLIGHT_WARN=1 to override."
+    exit 1
+  fi
+fi
+
 templates=()
 while IFS= read -r t; do templates+=("$t"); done < <(find "$SKILLS" -mindepth 2 -maxdepth 2 -name 'SKILL.md.tmpl' | sort)
 [ "${#templates[@]}" -gt 0 ] || fail "no templates found under $SKILLS"

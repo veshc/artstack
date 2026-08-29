@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# artstack-wtree - print a working-tree content fingerprint (a git tree hash).
+#
+# Adapted from gstack's bin/gstack-wtree (MIT, Copyright (c) Garry Tan).
+#
+# Why a content hash instead of a commit SHA. A review is valid for the code it
+# read, not for the commit it happened to sit on. Trains rebase, amend and
+# squash constantly under gated PRs, and every one of those rewrites the SHA
+# while leaving the content identical. Binding to content means:
+#
+#   - Committing the exact same content does not invalidate a review.
+#   - Rebase, amend and squash that preserve content do not invalidate it.
+#   - A real edit does invalidate it, including a new untracked source file.
+#
+# How it works. Copy the real index to a temp index (git writes the index
+# atomically via rename, so the copy is a consistent snapshot and the stat
+# cache survives, which keeps this fast), stage the whole working tree into
+# the temp index, and print its tree hash. The real index is never touched.
+#
+# Staged blobs land in .git/objects as unreachable objects and are collected by
+# gc, the same property `git stash -u` has. This means the content of untracked
+# non-ignored files enters the object store until gc runs.
+#
+# Exits 1 outside a git repo or in a repo with no commits. Callers treat a
+# non-zero exit as "no fingerprint available" and fall back to commit SHAs.
+set -euo pipefail
+
+TOP="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 1
+
+# Resolve the real index path BEFORE exporting GIT_INDEX_FILE. With the env var
+# already set, `git rev-parse --git-path index` returns the temp index and the
+# stat-cache seed silently copies the temp file onto itself.
+REAL_INDEX="$(git -C "$TOP" rev-parse --git-path index 2>/dev/null || true)"
+case "$REAL_INDEX" in
+  ""|/*) ;;
+  *) REAL_INDEX="$TOP/$REAL_INDEX" ;;
+esac
+
+TMPIDX="$(mktemp "${TMPDIR:-/tmp}/artstack-wtree-XXXXXX")"
+trap 'rm -f "$TMPIDX"' EXIT
+export GIT_INDEX_FILE="$TMPIDX"
+
+if [ -n "$REAL_INDEX" ] && [ -f "$REAL_INDEX" ] && cp "$REAL_INDEX" "$TMPIDX" 2>/dev/null; then
+  : # stat-cache preserving seed, much faster than re-hashing every file
+else
+  git -C "$TOP" read-tree HEAD 2>/dev/null || exit 1
+fi
+
+git -C "$TOP" add -A 2>/dev/null || exit 1
+
+# Exclude ArtStack's own state from the fingerprint. The ledger records facts
+# ABOUT this content; it is not part of it. Without this every ledger append
+# changes the tree it just fingerprinted, so no record is ever CURRENT and the
+# whole freshness mechanism reads as permanently stale.
+STATE_REL=".artstack"
+if [ -n "${ARTSTACK_STATE_DIR:-}" ]; then
+  case "$ARTSTACK_STATE_DIR" in
+    "$TOP"/*) STATE_REL="${ARTSTACK_STATE_DIR#"$TOP"/}" ;;
+    *) STATE_REL="" ;;  # state lives outside the repo, nothing to exclude
+  esac
+fi
+if [ -n "$STATE_REL" ]; then
+  git -C "$TOP" rm -r --cached --ignore-unmatch -q -- "$STATE_REL" 2>/dev/null || true
+fi
+
+git -C "$TOP" write-tree 2>/dev/null
