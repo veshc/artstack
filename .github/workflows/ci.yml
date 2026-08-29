@@ -53,10 +53,21 @@ jobs:
       # than trusting the document, and make a violation a review conversation.
       - name: No network calls in scripts
         run: |
-          if grep -rnE '(curl|wget|nc |ping )' build setup bin/ \
+          # Every script except the injection detector: any mention at all is
+          # suspicious and worth a human looking at it.
+          if grep -rnE '(curl|wget|nc |ping )' build setup bin/ --exclude=artstack-guard \
                | grep -vE '^\s*[^:]+:[0-9]+:\s*#' ; then
             echo "Network command found in an ArtStack script."
             echo "ArtStack makes no network calls. See docs/security.md."
+            exit 1
+          fi
+
+          # artstack-guard names these commands inside awk detection patterns:
+          # its job is to look FOR them in untrusted tracker text and mark the
+          # line [SUSPECT]. Naming a command in a pattern is not invoking one,
+          # so assert the stronger property instead - that it never runs one.
+          if grep -nE '^[[:space:]]*(curl|wget|nc|ping)[[:space:]]' bin/artstack-guard; then
+            echo "artstack-guard invokes a network command."
             exit 1
           fi
           echo "No network commands."
