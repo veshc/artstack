@@ -1,6 +1,12 @@
 # Team context: <team name>
 
-Team-level truth. Refresh when the team's stack, norms, or membership shape changes. No secrets, no personal data.
+Team-level truth. Refresh when the team's stack, norms, or membership shape
+changes. No secrets, no personal data.
+
+Lives at `.artstack/team.md` in the repository this team works in. If several
+teams share one repository, put each team's file at
+`.artstack/teams/<team-name>.md` and name the active one in a single line in
+`.artstack/active-team`.
 
 ## What we own
 

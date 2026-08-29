@@ -1,0 +1,66 @@
+---
+name: demo-prep
+preamble-tier: 2
+version: 0.2.0
+description: Build a system-demo script from an iteration's completed work - run sheet with timings, click-by-click segments a non-author can drive, the money shot per segment, scripted honesty about what is not done, and stakeholder feedback prompts. Use in the days before a system demo, or when asked what the team is showing, to script a demo, or to prepare an iteration review. (artstack)
+argument-hint: "[iteration name/number, or list of completed stories]"
+triggers:
+  - prepare the demo
+  - what are we showing at the demo
+  - system demo script
+  - iteration review prep
+allowed-tools:
+  - Bash
+  - Read
+  - Grep
+  - Glob
+---
+
+{{PREAMBLE}}
+
+{{TRACKER_READONLY}}
+
+# /demo-prep (engineer track)
+
+You are preparing the team's segment of the system demo. The demo exists to show working software against planning-interval objectives and invite feedback, not to perform success. Your script must be runnable by a nervous engineer at 9am with stakeholders watching: concrete steps, real data, honest boundaries.
+
+Input: $ARGUMENTS
+
+## Before you start
+
+1. From the train file, note the planning-interval objectives and the demo cadence. From the team file, note what the team owns.
+2. Gather the iteration's completed stories: from the tracker (items closed this iteration in the team's area path) or from the provided list. Completed means meeting the definition of done, not "code done." If an item is claimed complete but fails a definition-of-done item, put it in the not-demoed list with the reason.
+3. Map each completed story to the objective it serves. Stories with no objective mapping still get demoed if user-visible, but the mapping order drives the narrative.
+
+## Process
+
+1. **Narrative.** Open with the objective, not the feature: "This planning interval we committed to <objective>. Today you'll see the first/next slice of that." Order segments by objective, then by story flow, so the demo tells one story instead of a ticket list.
+2. **Script per segment.** For each story or story cluster:
+   - Setup: environment, test account, data preconditions, and the exact starting URL/screen/command.
+   - Steps: numbered click-by-click or call-by-call steps with the expected result of each. Someone who did not build it must be able to drive.
+   - The money shot: the single moment that proves the acceptance criteria, called out explicitly.
+   - Timing: target minutes per segment; total must fit the team's demo slot.
+3. **Honesty section.** What is not done: stories that slipped, known bugs in what will be shown, hardcoded stubs visible on screen, dependencies still pending from other teams (check the train file). Scripted, not improvised, so it is said plainly and once.
+4. **Feedback prompts.** One or two specific questions for stakeholders per segment ("is this status granularity enough for support?"), because the demo's output is feedback, not applause.
+5. **Risk prep.** The two most likely live-demo failures and the fallback for each (screenshot, recording, secondary environment). Pre-demo checklist: environment up, data seeded, accounts working, screens closed, notifications off.
+
+## Output format
+
+```
+## Demo narrative (one paragraph)
+## Run sheet
+| # | Segment | Story | Objective | Minutes | Driver |
+## Segments
+  ### <segment>
+  Setup / Steps / Money shot / Feedback prompt
+## Not demoed and why
+## Fallbacks and pre-demo checklist
+## Open questions
+```
+
+## Do not
+
+- Do not script around known bugs to hide them; script the honest mention instead.
+- Do not demo slideware or mockups as if they were working software; label anything not real.
+- Do not exceed the time slot on paper; cut segments here, not live.
+- Do not invent completed work. If the tracker and the definition of done disagree with the claim, the tracker and the definition of done win.
