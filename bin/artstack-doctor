@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# artstack-doctor - report what is available before a command relies on it.
+#
+# Every ArtStack command starts by running this and reading the STATUS lines.
+# That is how degraded mode works: a command never assumes the ledger exists,
+# never assumes git is present, and never claims it read a work item when no
+# tracker connection was configured. It reads the lines, says what it has, and
+# does the part of the job it can actually do.
+#
+# Usage:
+#   artstack-doctor            # STATUS lines for a command preamble
+#   artstack-doctor --human    # same information as prose, for a person
+#
+# Every line is KEY: value. Absent capability is reported, never worked around
+# silently. If this script itself is missing, commands treat that as full
+# degraded mode: no state, no ledger, no chaining, and they say so.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HUMAN=0
+[ "${1:-}" = "--human" ] && HUMAN=1
+
+echo "ARTSTACK_DOCTOR_PROTO: 1"
+echo "ARTSTACK_VERSION: $(cat "$SCRIPT_DIR/../VERSION" 2>/dev/null || echo "unknown")"
+
+# git
+if git rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "GIT: yes"
+  echo "BRANCH: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+  if [ -n "$(git status --porcelain -uno 2>/dev/null | head -1)" ]; then
+    echo "TREE: dirty"
+  else
+    echo "TREE: clean"
+  fi
+else
+  echo "GIT: no"
+  echo "BRANCH: none"
+  echo "TREE: unknown"
+fi
+
+# state
+if [ -x "$SCRIPT_DIR/artstack-state" ]; then
+  eval "$("$SCRIPT_DIR/artstack-state" 2>/dev/null || true)"
+  echo "STATE_DIR: ${ARTSTACK_STATE_DIR:-unknown}"
+  if [ -d "${ARTSTACK_STATE_DIR:-/nonexistent}" ]; then
+    echo "STATE: present"
+  else
+    echo "STATE: absent (created on first write)"
+  fi
+  if [ -f "${ARTSTACK_LEDGER:-/nonexistent}" ]; then
+    echo "LEDGER: $(wc -l < "$ARTSTACK_LEDGER" | tr -d ' ') record(s)"
+  else
+    echo "LEDGER: empty"
+  fi
+else
+  echo "STATE_DIR: unknown"
+  echo "STATE: unavailable (artstack-state missing, run ./setup)"
+  echo "LEDGER: unavailable"
+fi
+
+# content fingerprinting
+if [ -x "$SCRIPT_DIR/artstack-wtree" ] && "$SCRIPT_DIR/artstack-wtree" >/dev/null 2>&1; then
+  echo "FINGERPRINT: yes"
+else
+  echo "FINGERPRINT: no (freshness falls back to commit comparison)"
+fi
+
+# context layer
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+ART=""; TEAM=""
+if [ -x "$SCRIPT_DIR/artstack-context" ]; then
+  eval "$("$SCRIPT_DIR/artstack-context" 2>/dev/null || true)"
+  ART="${ARTSTACK_ART:-}"
+  TEAM="${ARTSTACK_TEAM:-}"
+else
+  for c in "$ROOT/.artstack/art.md" "$ROOT/context/art.md"; do [ -f "$c" ] && ART="$c" && break; done
+  for c in "$ROOT/.artstack/team.md" "$ROOT/context/team.md"; do [ -f "$c" ] && TEAM="$c" && break; done
+fi
+[ -n "$ART" ]  && echo "ART_CONTEXT: $ART"   || echo "ART_CONTEXT: missing"
+[ -n "$TEAM" ] && echo "TEAM_CONTEXT: $TEAM" || echo "TEAM_CONTEXT: missing"
+
+# Are the templates still unfilled? A file full of <placeholders> is worse than
+# a missing one, because a command will read it and believe it.
+if [ -n "$ART" ] && grep -qE '^\s*-?\s*<[a-z][^>]*>' "$ART" 2>/dev/null; then
+  echo "ART_CONTEXT_STATE: template (unfilled placeholders present)"
+elif [ -n "$ART" ]; then
+  echo "ART_CONTEXT_STATE: filled"
+fi
+
+# cadence
+if [ -x "$SCRIPT_DIR/artstack-cadence" ] && [ -n "$ART" ]; then
+  CAD="$("$SCRIPT_DIR/artstack-cadence" 2>/dev/null || true)"
+  echo "CADENCE: $(printf '%s' "$CAD" | grep '^PI_STATUS:' | sed 's/^PI_STATUS: //' || echo unknown)"
+  printf '%s\n' "$CAD" | grep '^SUMMARY:' || true
+else
+  echo "CADENCE: unknown"
+fi
+
+# named roles, the human sign-off slot
+if [ -n "$TEAM" ] && grep -qiE '^##[[:space:]]*Named roles' "$TEAM" 2>/dev/null; then
+  echo "SIGNOFF_GATES: declared"
+else
+  echo "SIGNOFF_GATES: none (records name the actor; no command blocks on a signature)"
+fi
+
+# tracker
+if [ -n "${ARTSTACK_TRACKER:-}" ]; then
+  echo "TRACKER: $ARTSTACK_TRACKER"
+else
+  echo "TRACKER: unset (commands must ask for pasted item text)"
+fi
+
+if [ "$HUMAN" = "1" ]; then
+  echo ""
+  echo "This is a capability report, not a health score. Anything marked missing"
+  echo "means a command will do less and say so, never that it will guess."
+fi

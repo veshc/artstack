@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# artstack-scan - look for credentials before text is written or committed.
+#
+# ArtStack artifacts hold pasted work item text, log excerpts and stack traces.
+# Those are exactly the places a token turns up by accident. This scans content
+# before it lands in .artstack/ and can be installed as a pre-commit hook.
+#
+# Usage:
+#   artstack-scan --file report.md
+#   cat report.md | artstack-scan --source pi-prep-output
+#   artstack-scan --install-hook        # pre-commit hook for this repo
+#
+# Exit codes:
+#   0  clean
+#   3  HIGH finding, a credential shape that is almost never a false positive
+#   4  MEDIUM finding, a shape that is often but not always a credential
+#
+# Findings report the pattern name and line number. The matched text is never
+# printed, because a scanner that echoes the secret into your terminal history
+# and your scrollback has moved the problem rather than solved it.
+#
+# This catches accidents and carelessness. It does not stop someone determined
+# to leak a credential, and it is not a substitute for your org's scanning.
+set -euo pipefail
+
+FILE=""
+SOURCE="stdin"
+INSTALL=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --file) FILE="${2:-}"; SOURCE="${2:-}"; shift 2 ;;
+    --source) SOURCE="${2:-stdin}"; shift 2 ;;
+    --install-hook) INSTALL=1; shift ;;
+    --help|-h) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "artstack-scan: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$INSTALL" = "1" ]; then
+  HOOK_DIR="$(git rev-parse --git-path hooks 2>/dev/null || true)"
+  if [ -z "$HOOK_DIR" ]; then
+    echo "artstack-scan: not in a git repository" >&2
+    exit 1
+  fi
+  mkdir -p "$HOOK_DIR"
+  HOOK="$HOOK_DIR/pre-commit"
+  if [ -f "$HOOK" ] && ! grep -q "artstack-scan" "$HOOK" 2>/dev/null; then
+    echo "artstack-scan: $HOOK already exists and is not ours." >&2
+    echo "Add this line to it yourself:" >&2
+    echo "  git diff --cached | \"$(cd "$(dirname "$0")" && pwd)/artstack-scan\" --source staged-diff || exit 1" >&2
+    exit 1
+  fi
+  cat > "$HOOK" <<HOOK_EOF
+#!/usr/bin/env bash
+# Installed by artstack-scan --install-hook
+set -uo pipefail
+git diff --cached | "$(cd "$(dirname "$0")" && pwd)/artstack-scan" --source staged-diff
+rc=\$?
+[ "\$rc" -eq 3 ] && exit 1
+exit 0
+HOOK_EOF
+  chmod +x "$HOOK"
+  echo "Installed pre-commit hook: $HOOK"
+  exit 0
+fi
+
+if [ -n "$FILE" ]; then
+  if [ ! -f "$FILE" ]; then
+    echo "artstack-scan: no such file: $FILE" >&2
+    exit 1
+  fi
+  exec < "$FILE"
+fi
+
+CONTENT="$(cat)"
+
+HIGH=0
+MED=0
+
+_hit() {
+  # _hit <severity> <name> <extended-regex>
+  # `|| true` is load-bearing: grep exits 1 on no-match, and under pipefail
+  # that would take down the whole scan on the first pattern that finds
+  # nothing, which is the common case for clean content.
+  local sev="$1" name="$2" re="$3" lines
+  lines="$(printf '%s\n' "$CONTENT" | grep -nE "$re" 2>/dev/null | cut -d: -f1 | tr '\n' ',' | sed 's/,$//' || true)"
+  if [ -n "$lines" ]; then
+    echo "$sev $name (line: $lines) in $SOURCE"
+    if [ "$sev" = "HIGH" ]; then HIGH=$((HIGH + 1)); else MED=$((MED + 1)); fi
+  fi
+}
+
+# HIGH: shapes that are credentials essentially every time they appear.
+_hit HIGH "aws-access-key"    'AKIA[0-9A-Z]{16}'
+_hit HIGH "github-token"      '(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})'
+_hit HIGH "openai-key"        'sk-[A-Za-z0-9_-]{20,}'
+_hit HIGH "slack-token"       'xox[baprs]-[A-Za-z0-9-]{10,}'
+_hit HIGH "private-key-block" '-----BEGIN [A-Z ]{3,}PRIVATE KEY-----'
+_hit HIGH "jwt"               'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'
+_hit HIGH "azure-storage-key" 'AccountKey=[A-Za-z0-9+/]{60,}'
+
+# MEDIUM: real shapes that also match documentation and placeholders. These
+# warn rather than block, because a scanner that cries wolf gets switched off.
+_hit MEDIUM "pem-block"         '-----BEGIN [A-Z ]{3,}-----'
+_hit MEDIUM "assigned-secret"   '(password|passwd|secret|api[_-]?key|apikey|access[_-]?token|auth[_-]?token)[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9_./+=-]{16,}'
+_hit MEDIUM "bearer-header"     '[Aa]uthorization[[:space:]]*:[[:space:]]*[Bb]earer[[:space:]]+[A-Za-z0-9_./+=-]{16,}'
+_hit MEDIUM "ado-pat-shape"     '(pat|token)[[:space:]]*[:=][[:space:]]*["'"'"']?[a-z2-7]{52}'
+_hit MEDIUM "url-with-password" '[a-zA-Z][a-zA-Z0-9+.-]*://[^/[:space:]:]+:[^/@[:space:]]{6,}@'
+
+if [ "$HIGH" -gt 0 ]; then
+  echo "artstack-scan: $HIGH HIGH finding(s). Refusing." >&2
+  echo "Remove the credential, or if it is a placeholder, change it to an obvious one." >&2
+  exit 3
+fi
+
+if [ "$MED" -gt 0 ]; then
+  echo "artstack-scan: $MED MEDIUM finding(s). Review before this text goes anywhere." >&2
+  exit 4
+fi
+
+echo "artstack-scan: clean ($SOURCE)"
+exit 0

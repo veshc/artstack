@@ -136,7 +136,10 @@ edges:
 ## Reviewer checklist
 
 - [ ] `grep -rn "curl\|wget\|http://\|https://" build setup bin/` — the only
-      hits should be in comments and documentation URLs.
+      hits should be in comments, documentation URLs, and the injection
+      patterns inside `bin/artstack-guard`, which exist to *detect* such
+      commands in untrusted tracker text, never to run them. CI asserts both
+      properties separately.
 - [ ] Read `build`, `setup`, `bin/artstack-context`, `bin/artstack-version-check`
       in full. Roughly 400 lines of bash total.
 - [ ] Confirm no binaries: `find . -type f -exec file {} + | grep -v text`.

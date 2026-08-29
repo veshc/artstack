@@ -20,6 +20,8 @@ allowed-tools:
 
 {{TRACKER_READONLY}}
 
+{{LEDGER}}
+
 # /review (engineer track)
 
 You are a staff engineer doing the review that CI cannot do. CI already checks style and runs the tests that exist. You hunt for what passes CI and detonates in production: logic errors, race conditions, contract breaks, security holes, and the tests that should exist but do not. This command is adapted from gstack's staff-engineer review with one change: it assumes gated pull requests and a train, so it reviews and reports; it never merges, pushes, or assumes authority over the default branch.

@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# artstack-read - render the ArtStack readiness dashboard from the ledger.
+#
+# Usage:
+#   artstack-read                  # this branch, all items
+#   artstack-read --item 12345     # only records for one work item
+#   artstack-read --team falcon    # only records produced by one team
+#   artstack-read --all-teams      # group the branch's records by team
+#   artstack-read --raw            # print the matching ledger lines, unformatted
+#
+# Freshness is decided by content, not by commit count. A record whose `wtree`
+# equals the current working-tree fingerprint is CURRENT no matter how many
+# rebases, amends or squashes happened in between. A record with a different
+# fingerprint is STALE: the code changed since that command ran.
+#
+#   CURRENT   the command ran against exactly this content
+#   STALE     content changed since the command ran, re-run before relying on it
+#   NO-BIND   record predates fingerprinting, or ran outside a git repo
+#
+# The gate is deliberately narrow. /review is the only command that blocks,
+# matching the repo rule that humans gate the PR and ArtStack only reports.
+# /arch-runway BLOCKED also blocks, because a blocked plan means build has not
+# been cleared to start. Everything else is shown for context.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+ITEM=""
+TEAM=""
+ALL_TEAMS=0
+RAW=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --item) ITEM="${2:-}"; shift 2 ;;
+    --team) TEAM="${2:-}"; shift 2 ;;
+    --all-teams) ALL_TEAMS=1; shift ;;
+    --raw) RAW=1; shift ;;
+    --help|-h) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "artstack-read: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+eval "$("$SCRIPT_DIR/artstack-state")"
+
+if [ ! -f "$ARTSTACK_LEDGER" ]; then
+  echo "ARTSTACK_READ_PROTO: 1"
+  echo "No ArtStack ledger for branch $ARTSTACK_BRANCH yet."
+  echo "It is created the first time a command runs on this branch."
+  exit 0
+fi
+
+if [ "$RAW" = "1" ]; then
+  if [ -n "$ITEM" ]; then
+    grep -F "\"item\":\"$ITEM\"" "$ARTSTACK_LEDGER" || true
+  else
+    cat "$ARTSTACK_LEDGER"
+  fi
+  exit 0
+fi
+
+CUR_WTREE="$("$SCRIPT_DIR/artstack-wtree" 2>/dev/null || true)"
+
+echo "ARTSTACK_READ_PROTO: 1"
+
+awk -v item="$ITEM" -v cur="$CUR_WTREE" -v branch="$ARTSTACK_BRANCH" \
+    -v want_team="$TEAM" -v all_teams="$ALL_TEAMS" '
+function jget(line, key,   re, s, p) {
+  re = "\"" key "\"[ ]*:[ ]*\""
+  p = match(line, re)
+  if (p > 0) {
+    s = substr(line, p + RLENGTH)
+    if (match(s, /^([^"\\]|\\.)*/)) return substr(s, 1, RLENGTH)
+    return ""
+  }
+  re = "\"" key "\"[ ]*:[ ]*"
+  p = match(line, re)
+  if (p > 0) {
+    s = substr(line, p + RLENGTH)
+    if (match(s, /^[^,}]+/)) return substr(s, 1, RLENGTH)
+  }
+  return ""
+}
+{
+  cmd = jget($0, "command")
+  if (cmd == "") next
+  rec_item = jget($0, "item")
+  if (item != "" && rec_item != item) next
+
+  rec_team = jget($0, "team")
+  if (want_team != "" && rec_team != want_team) next
+
+  # Team roll-up. Every record is counted per team so a train-level view can be
+  # built from the same ledger later (B1) without a second store.
+  t = (rec_team == "") ? "-" : rec_team
+  teams[t]++
+  if (cmd == "review") {
+    tstate = "NO-BIND"
+    w = jget($0, "wtree")
+    if (w != "" && cur != "") tstate = (w == cur) ? "CURRENT" : "STALE"
+    team_review[t] = tstate
+    team_review_verdict[t] = jget($0, "verdict")
+  }
+
+  runs[cmd]++
+  ts[cmd]      = jget($0, "ts")
+  verdict[cmd] = jget($0, "verdict")
+  wt[cmd]      = jget($0, "wtree")
+  actor[cmd]   = jget($0, "actor")
+  tm[cmd]      = rec_team
+  it[cmd]      = rec_item
+  seen[cmd]    = 1
+}
+END {
+  order = "pi-prep wsjf feature-review arch-runway review demo-prep test-plan automate regression defect dependency-check iteration-retro system-demo inspect-adapt pi-planning-prep"
+  n = split(order, ord, " ")
+
+  hdr = "ArtStack readiness - branch " branch
+  if (item != "") hdr = hdr " - item " item
+  if (want_team != "") hdr = hdr " - team " want_team
+  print ""
+  print hdr
+  line = "--------------------------------------------------------------------------------------"
+  print line
+  printf "%-17s %-5s %-21s %-18s %-12s %s\n", "Command", "Runs", "Last run", "Verdict", "Team", "State"
+  print line
+
+  blocked = 0; blockreason = ""
+  reviewed = 0
+
+  for (i = 1; i <= n; i++) {
+    c = ord[i]
+    if (!(c in seen)) {
+      if (item != "" || c == "review") {
+        printf "%-17s %-5s %-21s %-18s %-12s %s\n", c, "0", "-", "-", "-", "-"
+      }
+      continue
+    }
+    state = "NO-BIND"
+    if (wt[c] != "" && cur != "") state = (wt[c] == cur) ? "CURRENT" : "STALE"
+    v = verdict[c]; if (v == "") v = "-"
+    tn = tm[c]; if (tn == "") tn = "-"
+    printf "%-17s %-5s %-21s %-18s %-12s %s\n", c, runs[c], ts[c], substr(v,1,18), substr(tn,1,12), state
+    delete seen[c]
+    done[c] = 1
+
+    if (c == "review" && state == "CURRENT" && v != "REQUEST_CHANGES") reviewed = 1
+    if (c == "review" && v == "REQUEST_CHANGES") { blocked = 1; blockreason = "/review returned REQUEST_CHANGES" }
+    if (c == "arch-runway" && v == "BLOCKED") { blocked = 1; blockreason = "/arch-runway returned BLOCKED" }
+  }
+  # Any command not in the canonical order still gets a row.
+  for (c in seen) {
+    state = "NO-BIND"
+    if (wt[c] != "" && cur != "") state = (wt[c] == cur) ? "CURRENT" : "STALE"
+    v = verdict[c]; if (v == "") v = "-"
+    tn = tm[c]; if (tn == "") tn = "-"
+    printf "%-17s %-5s %-21s %-18s %-12s %s\n", c, runs[c], ts[c], substr(v,1,18), substr(tn,1,12), state
+  }
+
+  print line
+  if (blocked) {
+    print "VERDICT: BLOCKED - " blockreason
+  } else if (reviewed) {
+    print "VERDICT: REVIEWED - /review is clean against this exact content"
+  } else if (("review" in done)) {
+    print "VERDICT: NOT READY - /review is stale, re-run it against current content"
+  } else {
+    print "VERDICT: NOT READY - /review has not run on this branch"
+  }
+  # Per-team view. On a train the same branch can carry work from more than one
+  # team, and "is this ready" is a different answer for each of them.
+  nteams = 0
+  for (t in teams) nteams++
+  if (all_teams == 1 || nteams > 1) {
+    print ""
+    print "By team"
+    print line
+    printf "%-16s %-8s %-20s %s\n", "Team", "Records", "Review verdict", "Review state"
+    print line
+    for (t in teams) {
+      rv = (t in team_review_verdict) ? team_review_verdict[t] : "-"
+      rs = (t in team_review) ? team_review[t] : "not run"
+      if (rv == "") rv = "-"
+      printf "%-16s %-8s %-20s %s\n", substr(t,1,16), teams[t], substr(rv,1,20), rs
+    }
+    print line
+    if (want_team == "") {
+      print "Each team gates its own work. A verdict above covers only the records"
+      print "shown; use --team <name> to see one team on its own."
+    }
+  }
+
+  print ""
+  print "Humans gate the PR. This dashboard reports; it does not approve."
+}
+' "$ARTSTACK_LEDGER"

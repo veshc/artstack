@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# artstack-evidence - record what actually ran, against what content.
+#
+# "The tests pass" is a claim. This turns it into a receipt. /automate and
+# /regression wrap their test runs here, so when they report a result the
+# report cites a real run against a known working tree instead of a memory of
+# one from twenty minutes and three edits ago.
+#
+# Usage:
+#   artstack-evidence run --label unit -- npm test
+#   artstack-evidence run --label e2e --item 12345 -- npx playwright test
+#   artstack-evidence check --label unit
+#   artstack-evidence check --label unit --expect-cmd 'npm test' --max-age 24
+#   artstack-evidence list
+#
+# `run` passes the child's exit code straight through, so wrapping a command
+# never changes whether your suite is green.
+#
+# `check` grades each label:
+#   FRESH    recorded green, and the working tree is byte-identical to the
+#            content that was tested
+#   STALE    recorded, but the content changed since, or it is older than
+#            --max-age hours, or the recorded command does not match
+#            --expect-cmd
+#   FAILED   the recorded run exited non-zero
+#   MISSING  no record for this label on this branch
+#
+# check exits 0 only when every requested label is FRESH. It is a guardrail
+# for a human reading the output, not an enforcement mechanism.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+ACTION="${1:-}"
+[ $# -gt 0 ] && shift || true
+
+LABEL=""
+ITEM=""
+EXPECT_CMD=""
+MAX_AGE=""
+CMD=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --label) LABEL="${2:-}"; shift 2 ;;
+    --item) ITEM="${2:-}"; shift 2 ;;
+    --expect-cmd) EXPECT_CMD="${2:-}"; shift 2 ;;
+    --max-age) MAX_AGE="${2:-}"; shift 2 ;;
+    --) shift; CMD="$*"; break ;;
+    --help|-h) ACTION="--help"; shift ;;
+    *) echo "artstack-evidence: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ -z "$ACTION" ] || [ "$ACTION" = "--help" ]; then
+  sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+fi
+
+eval "$("$SCRIPT_DIR/artstack-state" --ensure)"
+
+_esc() {
+  printf '%s' "$1" | tr -d '\000-\010\013\014\016-\037' \
+    | tr '\n\r\t' '   ' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+case "$ACTION" in
+  run)
+    if [ -z "$LABEL" ] || [ -z "$CMD" ]; then
+      echo "artstack-evidence: run needs --label <name> and -- <command>" >&2
+      exit 2
+    fi
+
+    # Fingerprint BEFORE the run. A test run certifies the content it started
+    # against; if the command itself writes source files, the after-hash would
+    # certify content the tests never saw.
+    WTREE_BEFORE="$("$SCRIPT_DIR/artstack-wtree" 2>/dev/null || echo "")"
+    START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    START_EPOCH="$(date +%s)"
+
+    LOGDIR="$ARTSTACK_STATE_DIR/evidence/logs"
+    mkdir -p "$LOGDIR"
+    LOGFILE="$LOGDIR/$(date -u +%Y%m%d-%H%M%S)-$(printf '%s' "$LABEL" | tr -c 'A-Za-z0-9._-' '-').log"
+
+    set +e
+    # shellcheck disable=SC2086
+    ( eval "$CMD" ) 2>&1 | tee "$LOGFILE"
+    RC="${PIPESTATUS[0]}"
+    set -e
+    [ -n "$RC" ] || RC=1
+
+    END_EPOCH="$(date +%s)"
+    DURATION=$(( END_EPOCH - START_EPOCH ))
+
+    WTREE_AFTER="$("$SCRIPT_DIR/artstack-wtree" 2>/dev/null || echo "")"
+    MUTATED="false"
+    if [ -n "$WTREE_BEFORE" ] && [ -n "$WTREE_AFTER" ] && [ "$WTREE_BEFORE" != "$WTREE_AFTER" ]; then
+      MUTATED="true"
+    fi
+
+    chmod 600 "$LOGFILE" 2>/dev/null || true
+
+    REC="{\"ts\":\"$START\",\"label\":\"$(_esc "$LABEL")\",\"cmd\":\"$(_esc "$CMD")\""
+    REC="$REC,\"exit\":$RC,\"duration_s\":$DURATION"
+    [ -n "$WTREE_BEFORE" ] && REC="$REC,\"wtree\":\"$WTREE_BEFORE\""
+    REC="$REC,\"mutated_tree\":$MUTATED"
+    [ -n "$ITEM" ] && REC="$REC,\"item\":\"$(_esc "$ITEM")\""
+    REC="$REC,\"log\":\"$(_esc "$LOGFILE")\",\"branch\":\"$(_esc "$ARTSTACK_BRANCH")\"}"
+    printf '%s\n' "$REC" >> "$ARTSTACK_EVIDENCE"
+
+    if [ "$MUTATED" = "true" ]; then
+      echo "artstack-evidence: the run changed the working tree; evidence is bound to the pre-run content" >&2
+    fi
+    echo "EVIDENCE: label=$LABEL exit=$RC duration=${DURATION}s log=$LOGFILE" >&2
+    exit "$RC"
+    ;;
+
+  check)
+    if [ ! -f "$ARTSTACK_EVIDENCE" ]; then
+      echo "MISSING ${LABEL:-<all>} - no evidence recorded on branch $ARTSTACK_BRANCH"
+      exit 1
+    fi
+    CUR="$("$SCRIPT_DIR/artstack-wtree" 2>/dev/null || echo "")"
+    NOW="$(date +%s)"
+
+    awk -v want="$LABEL" -v cur="$CUR" -v expect="$EXPECT_CMD" \
+        -v maxage="$MAX_AGE" -v now="$NOW" '
+    function jget(line, key,   re, s, p) {
+      re = "\"" key "\"[ ]*:[ ]*\""
+      p = match(line, re)
+      if (p > 0) {
+        s = substr(line, p + RLENGTH)
+        if (match(s, /^([^"\\]|\\.)*/)) return substr(s, 1, RLENGTH)
+        return ""
+      }
+      re = "\"" key "\"[ ]*:[ ]*"
+      p = match(line, re)
+      if (p > 0) {
+        s = substr(line, p + RLENGTH)
+        if (match(s, /^[^,}]+/)) return substr(s, 1, RLENGTH)
+      }
+      return ""
+    }
+    # Exact days-from-civil. An approximation drifts by a day or two across a
+    # month boundary, which is meaningless next to a --max-age measured in
+    # hours, so this does the real calendar arithmetic.
+    function dfc(y, m, d,   era, yoe, doy, doe, yy, mm) {
+      yy = y; mm = m
+      if (mm <= 2) yy = yy - 1
+      era = int((yy >= 0 ? yy : yy - 399) / 400)
+      yoe = yy - era * 400
+      doy = int((153 * (mm + (mm > 2 ? -3 : 9)) + 2) / 5) + d - 1
+      doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
+      return era * 146097 + doe - 719468
+    }
+    function toepoch(ts,   y, mo, d, h, mi, s) {
+      if (ts !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/) return 0
+      y = substr(ts,1,4)+0; mo = substr(ts,6,2)+0; d = substr(ts,9,2)+0
+      h = substr(ts,12,2)+0; mi = substr(ts,15,2)+0; s = substr(ts,18,2)+0
+      return dfc(y, mo, d)*86400 + h*3600 + mi*60 + s
+    }
+    {
+      l = jget($0, "label")
+      if (l == "") next
+      if (want != "" && l != want) next
+      last[l] = $0
+      labels[l] = 1
+    }
+    END {
+      bad = 0
+      if (want != "" && !(want in labels)) {
+        print "MISSING " want " - no run recorded on this branch"
+        exit 1
+      }
+      for (l in labels) {
+        rec = last[l]
+        rc   = jget(rec, "exit")
+        wt   = jget(rec, "wtree")
+        ts   = jget(rec, "ts")
+        cmd  = jget(rec, "cmd")
+        lpath = jget(rec, "log")
+        state = "FRESH"; why = ""
+
+        if (rc != "0") { state = "FAILED"; why = "exit " rc }
+        else if (wt == "" || cur == "") { state = "STALE"; why = "no content fingerprint" }
+        else if (wt != cur) { state = "STALE"; why = "content changed since the run" }
+        else if (expect != "" && cmd != expect) { state = "STALE"; why = "command was: " cmd }
+        else if (maxage != "" && ts != "") {
+          age = (now - toepoch(ts)) / 3600
+          if (age > maxage + 0) { state = "STALE"; why = sprintf("%.1fh old, limit %sh", age, maxage) }
+        }
+        if (state != "FRESH") bad++
+        printf "%-8s %-12s %s%s\n", state, l, ts, (why == "" ? "" : "  (" why ")")
+        if (state != "FRESH" && lpath != "") printf "         log: %s\n", lpath
+      }
+      exit (bad > 0 ? 1 : 0)
+    }
+    ' "$ARTSTACK_EVIDENCE"
+    ;;
+
+  list)
+    [ -f "$ARTSTACK_EVIDENCE" ] || { echo "No evidence on branch $ARTSTACK_BRANCH."; exit 0; }
+    cat "$ARTSTACK_EVIDENCE"
+    ;;
+
+  *)
+    echo "artstack-evidence: unknown action '$ACTION' (run|check|list)" >&2
+    exit 2
+    ;;
+esac
