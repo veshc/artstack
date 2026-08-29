@@ -91,7 +91,12 @@ STAGED="$(git diff --cached --name-only 2>/dev/null | head -20 || true)"
 if [ -n "$STAGED" ]; then
   COUNT="$(printf '%s\n' "$STAGED" | grep -c . || true)"
   note "$COUNT path(s) already staged in the index:"
-  printf '%s\n' "$STAGED" | sed 's/^/      /' | { [ "$QUIET" = "1" ] || cat; }
+  # Build the indented list without a pipeline whose consumer may not read it:
+  # under --quiet nothing consumes stdin, sed takes SIGPIPE, and pipefail turns
+  # a successful check into exit 141.
+  if [ "$QUIET" = "0" ]; then
+    printf '%s\n' "$STAGED" | sed 's/^/      /'
+  fi
   say "    If you did not stage these, another session did. Never run"
   say "    'git add -A' here - inspect and reset first."
 fi

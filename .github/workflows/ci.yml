@@ -116,6 +116,23 @@ jobs:
           test ! -L "$CLAUDE_SKILLS_DIR/artstack-review" \
             || { echo "uninstall left a link behind"; exit 1; }
 
+  ledger:
+    name: ledger substrate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Substrate tests
+        run: ./test/ledger.sh -v
+
+      # The guard that exists because two sessions once shared this tree and
+      # one nearly committed the other's half-written files.
+      - name: build refuses to write into an unsafe tree
+        run: |
+          echo "x" > scratch.txt && git add scratch.txt
+          if ./build; then echo "build wrote despite staged foreign content"; exit 1; fi
+          ARTSTACK_PREFLIGHT_WARN=1 ./build || { echo "override did not work"; exit 1; }
+          git reset -q && rm -f scratch.txt
+
   context:
     name: context resolution
     runs-on: ubuntu-latest

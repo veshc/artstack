@@ -62,6 +62,56 @@ written once applies everywhere:
 A skill declares its tier in template frontmatter (`preamble-tier: N`). Tiers
 are cumulative.
 
+## State: the ledger
+
+ArtStack records what each command did, so the next one can see it.
+
+```
+<your repo>/.artstack/
+  ledger/<branch>.jsonl      one record per command run
+  artifacts/<key>/           command output, so a command can read the last one
+  evidence/<branch>.jsonl    test-run receipts
+  train/                     train-level state
+```
+
+`<key>` is the work item id when a command was given one, otherwise the branch.
+
+**It lives in the product repo, committed with the code.** That is the decision:
+it is the only place several people share by default, it reviews in a pull
+request like anything else, and it matches whole-train plus repo write access.
+Raw test logs under `evidence/logs/` are gitignored, because they hold whatever
+your suite printed.
+
+**Records are bound to content, not to commits.** `artstack-wtree` fingerprints
+the working tree, and a record carries that fingerprint. A rebase, amend or
+squash that preserves content keeps a review CURRENT; a real edit makes it
+STALE. On a train that rewrites gated pull requests constantly, binding to a
+commit would mark every review stale for no reason.
+
+**Every record carries a team.** `ts`, `team`, `branch`, `commit`, `wtree`,
+`dirty` and `actor` are stamped from the real environment and any caller-supplied
+value is discarded. A record labelled with the wrong team corrupts a train
+roll-up more quietly than a missing one.
+
+```bash
+bin/artstack-read                    # readiness for this branch
+bin/artstack-read --team falcon      # one team on its own
+bin/artstack-read --item 12345       # one work item
+bin/artstack-preflight               # is it safe to write here right now
+./test/ledger.sh                     # substrate tests
+```
+
+## Two agents, one working tree
+
+`build` and `setup` refuse to write when `artstack-preflight` reports content
+staged by someone else, a git operation in flight, another live ArtStack
+process, or a tree that moved mid-run. `ARTSTACK_PREFLIGHT_WARN=1` overrides.
+
+It does not block on a merely dirty tree: uncommitted work is normal, and the
+danger is not dirt but dirt you did not make. This exists because two sessions
+once shared this repo and one came within a single `git add -A` of committing
+the other's half-written files under its own message.
+
 ## Rules that do not bend
 
 - **The tracker is read-only.** Nothing writes back to Azure DevOps or Jira.
