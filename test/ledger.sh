@@ -201,6 +201,51 @@ echo "moved underneath us" > sneaky.txt
 "$BIN/artstack-preflight" --since "$MARK" --quiet
 assert_eq "a tree that moved mid-run fails" "$?" "1"
 
+# ── Decision rights ───────────────────────────────────────────
+echo "decision rights"
+REPO="$(new_repo)"; cd "$REPO"
+add_team "$REPO" falcon
+
+"$BIN/artstack-decide" --class MECHANICAL --what "unit proves AC-3" --why "pure fn" >/dev/null 2>&1
+OUT="$("$BIN/artstack-decide" --list 2>&1)"
+assert_contains "a mechanical decision is recorded as decided" "$OUT" "MECHANICAL     decided"
+
+# The one opinionated rule: an agent cannot write "decided" on a call it does
+# not own. Recording it that way would make the log lie about the boundary.
+"$BIN/artstack-decide" --class PRODUCT_OWNER --status decided --what "cut offline mode" >/dev/null 2>&1
+OUT="$("$BIN/artstack-decide" --list 2>&1)"
+assert_contains "a PO call is forced to escalated" "$OUT" "PRODUCT_OWNER  escalated"
+assert_absent   "and never recorded as decided"    "$OUT" "PRODUCT_OWNER  decided"
+
+"$BIN/artstack-decide" --class TRAIN --status decided --what "needs Orion to version events" >/dev/null 2>&1
+OUT="$("$BIN/artstack-decide" --list 2>&1)"
+assert_contains "a train call is forced to escalated" "$OUT" "TRAIN          escalated"
+
+OUT="$("$BIN/artstack-decide" --open 2>&1)"
+assert_contains "--open shows the PO escalation"    "$OUT" "PRODUCT_OWNER"
+assert_absent   "--open hides settled mechanics"    "$OUT" "MECHANICAL"
+
+"$BIN/artstack-decide" --class NONSENSE --what "x" >/dev/null 2>&1
+assert_eq "an unknown class is rejected" "$?" "2"
+
+"$BIN/artstack-decide" --class TEAM >/dev/null 2>&1
+assert_eq "a decision with no --what is rejected" "$?" "2"
+
+LOG="$(find "$REPO/.artstack/decisions" -name '*.jsonl' | head -1)"
+assert_contains "decisions carry a team like every other record" "$(cat "$LOG")" '"team":"falcon"'
+
+if command -v python3 >/dev/null 2>&1; then
+  RES="$(python3 -c "
+import json,sys
+bad=0
+for l in open(sys.argv[1]):
+    try: json.loads(l)
+    except Exception: bad=1
+print('INVALID' if bad else 'ALLVALID')
+" "$LOG" 2>&1 | tail -1)"
+  assert_eq "the decision log is valid JSON" "$RES" "ALLVALID"
+fi
+
 # ── Degraded mode ─────────────────────────────────────────────
 echo "degrades outside a git repo"
 NOGIT="$WORK/nogit"; mkdir -p "$NOGIT"; cd "$NOGIT"
