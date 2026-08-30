@@ -8,6 +8,7 @@
 #   ./setup --init-context --team <name>   ... for a named team on the train
 #   ./setup --uninstall        remove everything this script installed
 #   ./setup --check            report what is installed, change nothing
+#   ./setup --team-init        write the repo bootstrap so teammates install it
 #
 # What it does and does not do. It regenerates the skill files from their
 # templates, symlinks each skill into ~/.claude/skills/, records the version it
@@ -33,6 +34,7 @@ while [ $# -gt 0 ]; do
     --team) INIT_TEAM="${2:-}"; shift 2 ;;
     --uninstall) MODE="uninstall"; shift ;;
     --check) MODE="check"; shift ;;
+    --team-init) MODE="team-init"; shift ;;
     -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "setup: unknown flag: $1" >&2; exit 2 ;;
   esac
@@ -110,6 +112,53 @@ init_context() {
 
 if [ "$MODE" = "init-context" ]; then
   init_context
+  exit 0
+fi
+
+# ── Team bootstrap ────────────────────────────────────────────
+# Writes a section into the product repo's CLAUDE.md so a teammate who clones
+# it finds out ArtStack exists and how to install it. Deliberately a suggestion
+# rather than an enforcement hook: a tool that blocks work until you install it
+# earns resentment, not adoption, and this one has to survive a team choosing
+# not to use it.
+if [ "$MODE" = "team-init" ]; then
+  target_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  if [ "$target_root" = "$REPO_DIR" ]; then
+    say "Run --team-init from your product repository, not the ArtStack checkout."
+    exit 1
+  fi
+  CM="$target_root/CLAUDE.md"
+  if [ -f "$CM" ] && grep -q '^## ArtStack' "$CM" 2>/dev/null; then
+    say "CLAUDE.md already has an ArtStack section. Left alone."
+    exit 0
+  fi
+  {
+    [ -f "$CM" ] && echo ""
+    cat <<'SNIPPET'
+## ArtStack
+
+This repository uses ArtStack for AI-assisted release-train workflows.
+
+```bash
+git clone https://github.com/veshc/artstack.git ~/src/artstack
+cd ~/src/artstack && ./setup
+```
+
+Train and team context live in `.artstack/` and are committed. Refresh
+`.artstack/art.md` at every planning-interval boundary; stale context is worse
+than none because it is confidently wrong.
+
+Skills: /plan-feature /pi-prep /wsjf /feature-review /arch-runway /implement
+/review /test-plan /automate /regression /investigate /defect /ship /verify
+/demo-prep /art-status /dependency /inspect-adapt
+
+ArtStack never writes to the tracker, never merges a pull request, and never
+pushes to a protected branch. It makes no network calls of its own.
+SNIPPET
+  } >> "$CM"
+  say "Added an ArtStack section to $CM"
+  say "Commit it so teammates pick it up:"
+  say "  git add CLAUDE.md && git commit -m 'document ArtStack for this repo'"
   exit 0
 fi
 

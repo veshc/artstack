@@ -172,6 +172,19 @@ jobs:
       - name: Substrate tests
         run: ./test/ledger.sh -v
 
+      # The project promised measured results or no claim. A saved-hours number
+      # invented from command counts would break that promise in exactly the
+      # place it matters most, so assert the instrument never grows one.
+      - name: Metrics never invent unmeasurable numbers
+        run: |
+          if grep -qiE 'hours[_ ]saved|time[_ ]saved|productivity[_ ]gain' bin/artstack-metrics; then
+            echo "artstack-metrics claims a number the ledger cannot know."
+            exit 1
+          fi
+          grep -q 'ask the humans' bin/artstack-metrics \
+            || { echo "metrics no longer states what it cannot measure"; exit 1; }
+          echo "Metrics stays inside what the ledger knows." 
+
       # The guard that exists because two sessions once shared this tree and
       # one nearly committed the other's half-written files.
       - name: build refuses to write into an unsafe tree
