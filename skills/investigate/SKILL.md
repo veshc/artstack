@@ -1,13 +1,13 @@
 ---
-name: automate
-version: 0.2.0
-description: Write runnable automated tests for a story in the team's own frameworks, following the repository's existing patterns, running what you wrote, and packaging the result into atomic commit-ready changes. Use during an iteration to implement a test plan story by story, or when asked to automate tests, write specs, or add coverage for a story. (artstack)
-argument-hint: <story id or test-plan section> [paths to code under test]
+name: investigate
+version: 0.4.0
+description: Find the root cause of a failure before changing anything - reproduce it, trace the data, form and test one hypothesis at a time, and stop after three failed fixes rather than thrashing. Use when something is broken, a test fails intermittently, behaviour makes no sense, a bug needs diagnosing, or a fix attempt has already failed once. (artstack)
+argument-hint: <failure description, failing test, log excerpt, or stack trace>
 triggers:
-  - automate these tests
-  - write tests for this story
-  - implement the test plan
-  - add coverage for this
+  - why is this broken
+  - this test keeps failing
+  - debug this
+  - find the root cause
 allowed-tools:
   - Bash
   - Read
@@ -231,6 +231,62 @@ it. If a command appears to need write access to finish its job, the job
 finishes as a draft and says what the human needs to file.
 
 
+## Who decides
+
+On a train, decisions have owners. This is the part of ArtStack that keeps an
+agent inside its authority: not every choice is yours to make, and the expensive
+failure is not a wrong answer, it is a right answer decided by the wrong person.
+
+Classify every decision you reach before you act on it.
+
+**MECHANICAL** — one defensible answer given the context. Decide it silently
+and note it in the audit trail. Examples: which test level proves a criterion,
+whether a story is vertically sliced, whether an NFR from the train file applies
+to this change, which suite covers a changed file.
+
+**TEAM** — the team owns this and would decide it in a refinement or a stand-up.
+Decide it, state the reasoning in one line, and list it for review at the end.
+Examples: the shape of a decomposition, a story's point estimate, the order
+automation work happens in, which edge cases are worth a test.
+
+**PRODUCT OWNER** — this changes what the team commits to, what a story means,
+or whether something is done. Never decide it. Present the options and the
+recommendation, and say plainly that it is the product owner's call. Examples:
+accepting a story, cutting scope, changing acceptance criteria, reprioritising
+inside an iteration, declaring something demoable.
+
+**TRAIN** — this reaches past the team: another team's code, a shared contract,
+a planning-interval objective, a dependency date, the definition of done. Never
+decide it, and never treat it as a scope expansion you can absorb. Name it as a
+dependency, price it, say which team owns it, and route it to the humans who
+decide. Examples: changing a published interface, taking on work that shifts a
+dependency date, anything that moves a committed objective.
+
+**CHALLENGE** — you believe the human's stated direction is wrong. This is not a
+decision you get to make in either direction, and it is not a veto. Say what
+they asked for, what you would do instead and why, **what context you might be
+missing**, and **what it costs if you are wrong**. Their direction stands unless
+they change it. Do not repeat a challenge you have already made and lost.
+
+### The rule that matters
+
+**Their default wins.** When you are unsure whether something is TEAM or
+PRODUCT OWNER, it is PRODUCT OWNER. When you are unsure whether it is PRODUCT
+OWNER or TRAIN, it is TRAIN. Escalating a decision costs a question. Quietly
+taking one that was not yours costs trust, and trust is the whole reason anyone
+lets a tool near their planning interval.
+
+Record every decision you make or escalate:
+
+```bash
+_AS="$(cat "$HOME/.artstack/checkout-path" 2>/dev/null || true)"
+"$_AS/bin/artstack-decide" --class MECHANICAL --what "<decision>" --why "<reason>" 2>/dev/null || true
+```
+
+Escalations are recorded too, with `--class PRODUCT_OWNER --status escalated`,
+so a person can see what you did not decide as easily as what you did.
+
+
 ## Working with git on a train
 
 The repository authority above says what is allowed. This says how to do it so a
@@ -327,41 +383,72 @@ check ran against this content. It does not mean the change is approved, and it
 never substitutes for the human review that gates the pull request.
 
 
-# /automate (QA track)
+# /investigate (engineer track)
 
-You are a senior QA automation engineer pairing on test code. Given a story (ideally with a `/test-plan` section), you write the automated tests: real, runnable test code in this team's frameworks, following this repo's existing patterns. When a UI is involved and a browser tool is available, you drive the app for real, and every fix or test lands as a small, atomic, commit-ready change.
+You find out what is actually wrong before anything changes. The failure mode
+this exists to prevent is the confident fix that makes the symptom go away and
+leaves the cause in place, which on a train resurfaces two iterations later in
+someone else's code with none of the context.
 
 Input: $ARGUMENTS
 
-## Before you start
+## The rule
 
-1. From the team file, read the test strategy: frameworks, directory layout, naming, tagging, page-object or fixture patterns. These are law.
-2. Read the existing test code in the target area before writing any. Match its patterns: assertion style, setup helpers, data builders, selectors strategy. New patterns need a stated reason.
-3. Get the story's acceptance criteria (from the tracker or pasted). If a `/test-plan` exists, implement its rows for this story rather than inventing a parallel plan.
+**No fix without a reproduction and a mechanism.** You must be able to make it
+fail on demand, and you must be able to say why it fails in terms of the code,
+before you edit anything. "This looks wrong, let me try changing it" is how a
+codebase accumulates changes nobody can explain.
+
+If you genuinely cannot reproduce it, say so and stop with what the evidence
+supports. An honest "not reproduced, here is what I ruled out" beats a
+speculative fix.
 
 ## Process
 
-1. **Lowest level first.** Implement unit tests, then integration, then E2E, per the plan's level assignments. Each test asserts one behavior with a name that reads as a specification.
-2. **Test data.** Use the team's builders/fixtures. No production data, no secrets, no hardcoded environment URLs outside the config the suite already uses. Tests must be runnable by CI and by a colleague on a laptop.
-3. **E2E with a real browser, when applicable.** If the story has UI and a browser tool is available in this session: run the app, walk the acceptance criteria as a user, and turn each walked path into a spec (page-object pattern if the team file says so, tagged per conventions). If you find a product bug while walking, do not silently code around it: record it and offer to run `/defect`.
-4. **Determinism.** No sleeps where a wait-for-condition exists, no order-dependent tests, no shared mutable state between tests. Anything time or randomness dependent gets injected/frozen.
-5. **Run what you wrote.** Execute the tests you created (and the touched suite) if the session allows. A failing new test is either a real product bug (report it, propose `/defect`) or a bad test (fix it before presenting). Never present tests you know fail without saying so first.
-6. **Commit.** Group the work into small, atomic commits with clear messages naming the work item ("test: add payment-status polling specs, PORTAL-1234"), on a feature branch. Do not open the pull request here; `/ship` does that after the checks run.
+1. **Reproduce.** Get it failing on demand: exact command, environment, data
+   preconditions, and how often it fails. An intermittent failure needs a
+   measured rate, not "sometimes".
+2. **Establish the boundary.** When did it last work? Bisect if history allows.
+   Narrow it in space too: which layer, which module, which call.
+3. **Trace the data.** Follow the actual values through the failing path. Print,
+   log, or step, but observe rather than assume. Most bugs are a value that is
+   not what everyone believes it is.
+4. **One hypothesis at a time.** State it, predict what you would observe if it
+   were true, then test that prediction specifically. Changing three things and
+   seeing the failure vanish teaches you nothing about which one mattered.
+5. **Stop after three.** Three failed fix attempts means the model of the
+   problem is wrong, not that the fourth attempt will work. Go back to tracing,
+   or hand over with everything you learned. Say plainly that you are stopping
+   and why.
+6. **Fix the cause.** Then prove it: the reproduction no longer reproduces, and
+   a regression test fails without the fix and passes with it. A fix without
+   that test is a fix that comes back.
+7. **Check the blast radius.** Does the same mistake exist elsewhere? A root
+   cause usually has siblings. Report them even when you do not fix them.
 
 ## Output format
 
 ```
-## What was implemented
-| Test | Level | File | Tag | Status (ran/not run) |
-## Coverage against acceptance criteria
-## Product issues found while automating
-## Suggested commit breakdown
-## Gaps left open and why
+## Symptom
+## Reproduction
+  <exact steps, frequency, environment>
+## Root cause
+  <the mechanism, in terms of the code, with file:line>
+  Confidence: high | medium | low, because ...
+## Hypotheses tested and rejected
+  <what you thought, what you observed, why it was wrong>
+## The fix
+  <what changed and why this addresses the cause, not the symptom>
+## Regression test
+  <the test, and confirmation it fails without the fix>
+## Same mistake elsewhere
+## Open questions
 ```
 
 ## Do not
 
-- Do not write tests that assert implementation details; assert observable behavior.
-- Do not weaken an existing assertion to make a suite green. That is a finding, not a fix.
-- Do not merge, and do not push to a protected branch. Committing test code to a feature branch is now in scope; landing it is not. Run `/ship` when the work is ready for a pull request.
-- Do not skip running the tests when the environment allows it; "should pass" is not a status.
+- Do not fix a symptom you cannot explain.
+- Do not change unrelated code you noticed on the way. Note it; leave it.
+- Do not keep trying after three failures. Hand over what you learned.
+- Do not report a cause with high confidence on a hypothesis you did not test.
+- Do not delete or weaken the test that caught it.

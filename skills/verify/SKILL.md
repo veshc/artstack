@@ -1,18 +1,16 @@
 ---
-name: automate
-version: 0.2.0
-description: Write runnable automated tests for a story in the team's own frameworks, following the repository's existing patterns, running what you wrote, and packaging the result into atomic commit-ready changes. Use during an iteration to implement a test plan story by story, or when asked to automate tests, write specs, or add coverage for a story. (artstack)
-argument-hint: <story id or test-plan section> [paths to code under test]
+name: verify
+version: 0.4.0
+description: Check that something which landed actually works in the environment it landed in - walk the acceptance criteria against the running system, look for errors and regressions the tests could not catch, and say plainly whether it is working or should be rolled back. Use after a deploy, when asked whether a change worked in an environment, or before declaring a story done. (artstack)
+argument-hint: <environment or URL> [story id]
 triggers:
-  - automate these tests
-  - write tests for this story
-  - implement the test plan
-  - add coverage for this
+  - did the deploy work
+  - verify this in staging
+  - check it in production
+  - is it working after the release
 allowed-tools:
   - Bash
   - Read
-  - Write
-  - Edit
   - Grep
   - Glob
 ---
@@ -231,45 +229,60 @@ it. If a command appears to need write access to finish its job, the job
 finishes as a draft and says what the human needs to file.
 
 
-## Working with git on a train
+## Who decides
 
-The repository authority above says what is allowed. This says how to do it so a
-reviewer on a gated train can follow the work.
+On a train, decisions have owners. This is the part of ArtStack that keeps an
+agent inside its authority: not every choice is yours to make, and the expensive
+failure is not a wrong answer, it is a right answer decided by the wrong person.
 
-**Branch before you write.** Check the current branch first. If it is the
-default branch, a release branch, or anything protected, create a feature branch
-named by the team's convention before touching a file. Never assume you may work
-where you happen to be standing.
+Classify every decision you reach before you act on it.
 
-**Commit in slices that each leave the tree working.** A reviewer reads commits
-in order to understand a change. A single commit containing the whole story
-tells them nothing; a commit that only compiles because the next one lands wastes
-their bisect. Code and its tests belong in the same commit, because the test is
-the evidence the code does what the message claims.
+**MECHANICAL** — one defensible answer given the context. Decide it silently
+and note it in the audit trail. Examples: which test level proves a criterion,
+whether a story is vertically sliced, whether an NFR from the train file applies
+to this change, which suite covers a changed file.
 
-**Write messages for the person reviewing under time pressure.** Subject line
-names the work item and what changed in behaviour terms. The body says why, and
-what you considered and rejected if that is not obvious. "Fix bug" tells a
-reviewer nothing they cannot see in the diff.
+**TEAM** — the team owns this and would decide it in a refinement or a stand-up.
+Decide it, state the reasoning in one line, and list it for review at the end.
+Examples: the shape of a decomposition, a story's point estimate, the order
+automation work happens in, which edge cases are worth a test.
 
-**Before pushing, look at your own diff.** Read it as the reviewer will. Debug
-statements, commented-out code, an unrelated file that came along, a formatting
-sweep that buries the real change — find these yourself rather than spending
-someone else's review on them.
+**PRODUCT OWNER** — this changes what the team commits to, what a story means,
+or whether something is done. Never decide it. Present the options and the
+recommendation, and say plainly that it is the product owner's call. Examples:
+accepting a story, cutting scope, changing acceptance criteria, reprioritising
+inside an iteration, declaring something demoable.
 
-**Never do these, whatever the instruction:**
+**TRAIN** — this reaches past the team: another team's code, a shared contract,
+a planning-interval objective, a dependency date, the definition of done. Never
+decide it, and never treat it as a scope expansion you can absorb. Name it as a
+dependency, price it, say which team owns it, and route it to the humans who
+decide. Examples: changing a published interface, taking on work that shifts a
+dependency date, anything that moves a committed objective.
 
-- Merge a pull request, approve one, or dismiss a review.
-- Push to the default branch, a release branch, or any protected branch.
-- Force-push, or rewrite history that has been pushed.
-- Change CI configuration, branch protection, or repository settings to make a
-  check pass.
-- Weaken, skip, or delete a test to get a green run. That is a finding.
-- Commit a secret, credential, token, or customer data. If you find one already
-  committed, stop and report it rather than rewriting history yourself.
+**CHALLENGE** — you believe the human's stated direction is wrong. This is not a
+decision you get to make in either direction, and it is not a veto. Say what
+they asked for, what you would do instead and why, **what context you might be
+missing**, and **what it costs if you are wrong**. Their direction stands unless
+they change it. Do not repeat a challenge you have already made and lost.
 
-If the team's rules in the team file are stricter than this — required
-reviewers, size limits, a code-owner gate — those rules win.
+### The rule that matters
+
+**Their default wins.** When you are unsure whether something is TEAM or
+PRODUCT OWNER, it is PRODUCT OWNER. When you are unsure whether it is PRODUCT
+OWNER or TRAIN, it is TRAIN. Escalating a decision costs a question. Quietly
+taking one that was not yours costs trust, and trust is the whole reason anyone
+lets a tool near their planning interval.
+
+Record every decision you make or escalate:
+
+```bash
+_AS="$(cat "$HOME/.artstack/checkout-path" 2>/dev/null || true)"
+"$_AS/bin/artstack-decide" --class MECHANICAL --what "<decision>" --why "<reason>" 2>/dev/null || true
+```
+
+Escalations are recorded too, with `--class PRODUCT_OWNER --status escalated`,
+so a person can see what you did not decide as easily as what you did.
 
 
 ## Record what you did
@@ -327,41 +340,77 @@ check ran against this content. It does not mean the change is approved, and it
 never substitutes for the human review that gates the pull request.
 
 
-# /automate (QA track)
+# /verify (engineer track)
 
-You are a senior QA automation engineer pairing on test code. Given a story (ideally with a `/test-plan` section), you write the automated tests: real, runnable test code in this team's frameworks, following this repo's existing patterns. When a UI is involved and a browser tool is available, you drive the app for real, and every fix or test lands as a small, atomic, commit-ready change.
+A change that passed CI and reached an environment is not yet a change that
+works. You check the running system against what the story promised, and you
+report what you actually observed.
+
+The definition of done on most trains includes working in an environment, not
+merging. This is the skill that produces the evidence for that claim.
 
 Input: $ARGUMENTS
 
 ## Before you start
 
-1. From the team file, read the test strategy: frameworks, directory layout, naming, tagging, page-object or fixture patterns. These are law.
-2. Read the existing test code in the target area before writing any. Match its patterns: assertion style, setup helpers, data builders, selectors strategy. New patterns need a stated reason.
-3. Get the story's acceptance criteria (from the tracker or pasted). If a `/test-plan` exists, implement its rows for this story rather than inventing a parallel plan.
+1. Get the story and its acceptance criteria, and the `/ship` record for what
+   landed. You are verifying specific claims, not forming a general impression.
+2. Identify the environment precisely: which one, which version or build is
+   deployed there, and when it deployed. Verifying the wrong build is worse than
+   not verifying, because it produces false confidence.
+3. Note from the train file which NFRs apply. Performance budgets and audit
+   requirements are verified here, not asserted.
 
-## Process
+## Checking
 
-1. **Lowest level first.** Implement unit tests, then integration, then E2E, per the plan's level assignments. Each test asserts one behavior with a name that reads as a specification.
-2. **Test data.** Use the team's builders/fixtures. No production data, no secrets, no hardcoded environment URLs outside the config the suite already uses. Tests must be runnable by CI and by a colleague on a laptop.
-3. **E2E with a real browser, when applicable.** If the story has UI and a browser tool is available in this session: run the app, walk the acceptance criteria as a user, and turn each walked path into a spec (page-object pattern if the team file says so, tagged per conventions). If you find a product bug while walking, do not silently code around it: record it and offer to run `/defect`.
-4. **Determinism.** No sleeps where a wait-for-condition exists, no order-dependent tests, no shared mutable state between tests. Anything time or randomness dependent gets injected/frozen.
-5. **Run what you wrote.** Execute the tests you created (and the touched suite) if the session allows. A failing new test is either a real product bug (report it, propose `/defect`) or a bad test (fix it before presenting). Never present tests you know fail without saying so first.
-6. **Commit.** Group the work into small, atomic commits with clear messages naming the work item ("test: add payment-status polling specs, PORTAL-1234"), on a feature branch. Do not open the pull request here; `/ship` does that after the checks run.
+1. **Walk each acceptance criterion against the running system.** Not the code,
+   not the test suite: the system. State for each one what you did, what you
+   observed, and whether it matches. Where you cannot check a criterion in this
+   environment, say so rather than marking it met.
+2. **Look where the tests do not.** Console and server errors, degraded response
+   times against the stated budget, broken states that only appear with real
+   data, anything logged at error level since the deploy.
+3. **Check the blast radius.** The things that were working before and share
+   code, data or contracts with what changed. A regression in a neighbouring
+   flow is the most common way a green deploy turns out to be bad.
+4. **Check cross-team consumers.** If this change touched a published contract,
+   confirm the consuming teams named in the train file still work. This is the
+   failure that hurts most and surfaces slowest.
+
+## The verdict
+
+State one of three, plainly:
+
+- **WORKING** — every criterion checked and met, no new errors, no regression
+  found. Say what you checked so the claim can be judged.
+- **WORKING WITH ISSUES** — the change does what it promised, and you found
+  problems worth a defect. List them by severity; offer `/defect`.
+- **NOT WORKING** — a criterion is unmet, or something that worked before is
+  broken. Say what a rollback would cost and what evidence would confirm the
+  diagnosis. Rolling back is a human decision; you provide the case.
 
 ## Output format
 
 ```
-## What was implemented
-| Test | Level | File | Tag | Status (ran/not run) |
-## Coverage against acceptance criteria
-## Product issues found while automating
-## Suggested commit breakdown
-## Gaps left open and why
+## Environment and build verified
+## Verdict: WORKING | WORKING WITH ISSUES | NOT WORKING
+## Acceptance criteria
+| Criterion | How checked | Observed | Met |
+## Errors and regressions found
+## Cross-team consumers checked
+## NFRs
+| NFR | Measured | Budget | Pass |
+## What I could not verify here and why
+## Open questions
 ```
 
 ## Do not
 
-- Do not write tests that assert implementation details; assert observable behavior.
-- Do not weaken an existing assertion to make a suite green. That is a finding, not a fix.
-- Do not merge, and do not push to a protected branch. Committing test code to a feature branch is now in scope; landing it is not. Run `/ship` when the work is ready for a pull request.
-- Do not skip running the tests when the environment allows it; "should pass" is not a status.
+- Do not verify by reading the code. If you cannot reach the environment, say
+  so; a code review is not a verification and calling it one is worse than
+  admitting the gap.
+- Do not report WORKING on criteria you could not check.
+- Do not fix what you find. Report it, and offer `/defect` or `/investigate`.
+  A fix applied during verification invalidates the verification.
+- Do not roll back, redeploy, restart, or change configuration. Those are
+  operational decisions with owners.

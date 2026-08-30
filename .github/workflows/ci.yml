@@ -83,6 +83,37 @@ jobs:
           echo "All domain skills carry the tracker boundary."
 
       # The rule people will judge this tool on.
+      # Every skill that can write to the repo must carry the git boundary, and
+      # none of them may claim the authority to land work. On a train the merge
+      # belongs to the humans who own the gate.
+      - name: Write-capable skills carry the git boundary
+        run: |
+          for f in skills/implement/SKILL.md skills/ship/SKILL.md \
+                   skills/investigate/SKILL.md skills/automate/SKILL.md \
+                   skills/regression/SKILL.md skills/verify/SKILL.md; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              */verify/*) continue ;;   # read-only by design
+            esac
+            grep -q 'Working with git on a train' "$f" \
+              || { echo "missing git boundary: $f"; exit 1; }
+          done
+          echo "All write-capable skills carry the git boundary."
+
+      - name: No skill claims authority to merge or push to main
+        run: |
+          bad=0
+          for f in skills/*/SKILL.md; do
+            grep -qE 'Never (merge|push to)' "$f" && continue
+            grep -qE 'Do not merge' "$f" && continue
+            case "$f" in
+              */artstack/*|*/wsjf/*|*/defect/*|*/demo-prep/*|*/test-plan/*|*/pi-prep/*|*/feature-review/*|*/arch-runway/*|*/plan-feature/*|*/verify/*) continue ;;
+            esac
+            echo "no merge prohibition found in $f"; bad=1
+          done
+          [ "$bad" = "0" ] || exit 1
+          echo "No skill claims merge authority."
+
       - name: Open questions rule present in every skill
         run: |
           missing="$(grep -L 'Open questions' skills/*/SKILL.md || true)"
