@@ -177,7 +177,11 @@ jobs:
       # place it matters most, so assert the instrument never grows one.
       - name: Metrics never invent unmeasurable numbers
         run: |
-          if grep -qiE 'hours[_ ]saved|time[_ ]saved|productivity[_ ]gain' bin/artstack-metrics; then
+          # Comments are excluded on purpose: the header names these figures in
+          # order to say the tool refuses to report them. Naming a thing you
+          # will not do is not doing it, so check the executable lines only.
+          if grep -vE '^[[:space:]]*#' bin/artstack-metrics \
+               | grep -qiE 'hours[_ ]saved|time[_ ]saved|productivity[_ ]gain'; then
             echo "artstack-metrics claims a number the ledger cannot know."
             exit 1
           fi
