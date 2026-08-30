@@ -106,6 +106,10 @@ When the request matches one of these, **invoke that skill** rather than
 answering inline. The skill carries a checked workflow, an output contract, and
 the train's ground rules; an ad-hoc answer carries none of them.
 
+**Whole-feature pipeline**
+- Plan a feature end to end, "get this ready for planning", "run the full
+  pipeline", epic straight through to a locked plan → `/plan-feature`
+
 **Planning and scope**
 - Decompose an epic or feature, write stories, get ready for planning, "break
   this down", "what are the stories" → `/pi-prep`

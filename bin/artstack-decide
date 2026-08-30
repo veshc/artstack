@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# artstack-decide - record one decision, and who it belonged to.
+#
+# Usage:
+#   artstack-decide --class MECHANICAL --what "..." --why "..."
+#   artstack-decide --class PRODUCT_OWNER --status escalated --what "..." \
+#                   --why "..." --options "A: ... | B: ..." --recommend A
+#   artstack-decide --list                 # this branch, this team
+#   artstack-decide --open                 # only what is still waiting on a human
+#
+# Classes: MECHANICAL, TEAM, PRODUCT_OWNER, TRAIN, CHALLENGE.
+# Status:  decided (default) or escalated.
+#
+# Why a log rather than a gate. ArtStack cannot enforce that a product owner
+# actually decided something - it has no way to authenticate a person, and
+# pretending otherwise would be security theatre in a tool whose whole posture
+# is that humans gate everything. What it can do is make the boundary visible:
+# every decision an agent took, every one it refused to take, who owned each,
+# and which are still open. A person reads the list and sees exactly where the
+# agent stopped.
+#
+# Records land in .artstack/decisions/<branch>.jsonl, keyed by team like every
+# other record, so decisions roll up to the train the same way.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+CLASS=""
+WHAT=""
+WHY=""
+OPTIONS=""
+RECOMMEND=""
+ITEM=""
+STATUS="decided"
+ACTION="add"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --class) CLASS="${2:-}"; shift 2 ;;
+    --what) WHAT="${2:-}"; shift 2 ;;
+    --why) WHY="${2:-}"; shift 2 ;;
+    --options) OPTIONS="${2:-}"; shift 2 ;;
+    --recommend) RECOMMEND="${2:-}"; shift 2 ;;
+    --item) ITEM="${2:-}"; shift 2 ;;
+    --status) STATUS="${2:-}"; shift 2 ;;
+    --list) ACTION="list"; shift ;;
+    --open) ACTION="open"; shift ;;
+    --help|-h) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "artstack-decide: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ -n "$ITEM" ]; then
+  eval "$("$SCRIPT_DIR/artstack-state" --key "$ITEM")"
+else
+  eval "$("$SCRIPT_DIR/artstack-state")"
+fi
+
+LOG="$ARTSTACK_STATE_DIR/decisions/$ARTSTACK_BRANCH_SAFE.jsonl"
+
+if [ "$ACTION" = "list" ] || [ "$ACTION" = "open" ]; then
+  if [ ! -f "$LOG" ]; then
+    echo "No decisions recorded on branch $ARTSTACK_BRANCH."
+    exit 0
+  fi
+  awk -v only_open="$([ "$ACTION" = "open" ] && echo 1 || echo 0)" '
+  function jget(line, key,   re, s, p) {
+    re = "\"" key "\"[ ]*:[ ]*\""
+    p = match(line, re)
+    if (p > 0) {
+      s = substr(line, p + RLENGTH)
+      if (match(s, /^([^"\\]|\\.)*/)) return substr(s, 1, RLENGTH)
+    }
+    return ""
+  }
+  {
+    st = jget($0, "status")
+    if (only_open == 1 && st != "escalated") next
+    cl = jget($0, "class"); wt = jget($0, "what"); wy = jget($0, "why")
+    tm = jget($0, "team");  it = jget($0, "item"); rc = jget($0, "recommend")
+    n++
+    printf "%-14s %-9s %s\n", cl, st, wt
+    if (wy != "") printf "               why: %s\n", wy
+    if (rc != "") printf "               recommend: %s\n", rc
+    if (tm != "" || it != "") printf "               team: %s  item: %s\n", (tm==""?"-":tm), (it==""?"-":it)
+    print ""
+  }
+  END {
+    if (n == 0) print (only_open == 1 ? "Nothing waiting on a human." : "No decisions recorded.")
+    else printf "%d decision(s).\n", n
+  }' "$LOG"
+  exit 0
+fi
+
+case "$CLASS" in
+  MECHANICAL|TEAM|PRODUCT_OWNER|TRAIN|CHALLENGE) ;;
+  *) echo "artstack-decide: --class must be MECHANICAL, TEAM, PRODUCT_OWNER, TRAIN or CHALLENGE" >&2; exit 2 ;;
+esac
+case "$STATUS" in
+  decided|escalated) ;;
+  *) echo "artstack-decide: --status must be decided or escalated" >&2; exit 2 ;;
+esac
+[ -n "$WHAT" ] || { echo "artstack-decide: --what is required" >&2; exit 2; }
+
+# A class the agent does not own cannot be recorded as decided. This is the one
+# place the tool is opinionated rather than descriptive: writing "decided" on a
+# product owner's call would make the log lie about where the boundary was.
+case "$CLASS" in
+  PRODUCT_OWNER|TRAIN|CHALLENGE)
+    if [ "$STATUS" = "decided" ]; then
+      STATUS="escalated"
+    fi
+    ;;
+esac
+
+_esc() {
+  printf '%s' "$1" \
+    | tr -d '\000-\010\013\014\016-\037' \
+    | tr '\n\r\t' '   ' \
+    | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+mkdir -p "$(dirname "$LOG")"
+
+REC="{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
+REC="$REC,\"branch\":\"$(_esc "$ARTSTACK_BRANCH")\""
+[ -n "${ARTSTACK_TEAM_NAME:-}" ] && REC="$REC,\"team\":\"$(_esc "$ARTSTACK_TEAM_NAME")\""
+[ -n "$ITEM" ] && REC="$REC,\"item\":\"$(_esc "$ITEM")\""
+REC="$REC,\"class\":\"$CLASS\",\"status\":\"$STATUS\""
+REC="$REC,\"what\":\"$(_esc "$WHAT")\""
+[ -n "$WHY" ] && REC="$REC,\"why\":\"$(_esc "$WHY")\""
+[ -n "$OPTIONS" ] && REC="$REC,\"options\":\"$(_esc "$OPTIONS")\""
+[ -n "$RECOMMEND" ] && REC="$REC,\"recommend\":\"$(_esc "$RECOMMEND")\""
+REC="$REC}"
+
+printf '%s\n' "$REC" >> "$LOG"
+printf 'DECISION: %s %s\n' "$CLASS" "$STATUS"

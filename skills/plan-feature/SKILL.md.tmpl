@@ -1,0 +1,118 @@
+---
+name: plan-feature
+preamble-tier: 3
+version: 0.3.0
+description: Take one feature from raw work item to a locked, planning-ready plan in a single gated pipeline - decomposition, scope challenge, architectural runway, and test approach - deciding what the team owns and escalating what belongs to the product owner or the train. Use when asked to plan a feature end to end, get something ready for planning, run the full review pipeline, or turn an epic into a committed plan. (artstack)
+argument-hint: <work item id or pasted feature> [--mode expand|selective|hold|reduce]
+triggers:
+  - plan this feature
+  - get this ready for planning
+  - run the full planning pipeline
+  - take this from epic to plan
+allowed-tools:
+  - Bash
+  - Read
+  - Grep
+  - Glob
+  - AskUserQuestion
+---
+
+{{PREAMBLE}}
+
+{{TRACKER_READONLY}}
+
+{{DECISION_RIGHTS}}
+
+{{LEDGER}}
+
+# /plan-feature (engineer track)
+
+One feature in, a locked plan out. This runs the planning skills in the order a
+train runs them, carries each phase's output into the next, and decides the
+things a team decides so a person is only asked about the things a person owns.
+
+It is not a shortcut past the work. Every phase does its full job; what changes
+is who answers the questions along the way.
+
+Input: $ARGUMENTS
+
+## Phases, in order. Do not reorder or run in parallel.
+
+Each phase reads the previous phase's artifact. Complete a phase fully, save its
+artifact, log its record, then start the next.
+
+**Phase 1 - Decompose.** Follow the `/pi-prep` skill at full depth: read
+`~/.claude/skills/pi-prep/SKILL.md` and execute it. Output stories with real
+acceptance criteria, enablers, dependencies, ROAM-ready risks, load against
+capacity, and proposed objective wording.
+
+**Phase 2 - Challenge scope.** Follow `/feature-review` in the mode given, or
+`selective` if none was given. If the decomposition in Phase 1 came out larger
+than the stated capacity, use `reduce` instead and say why you overrode the
+default.
+
+**Phase 3 - Lock the technical plan.** Follow `/arch-runway`. This is the phase
+that can stop the pipeline: a BLOCKED verdict means build has not been cleared
+to start, and BLOCKED is a respectable outcome. Do not soften it to keep the
+pipeline moving.
+
+**Phase 4 - Test approach.** Follow `/test-plan` against the stories from Phase
+1 and the edge cases from Phase 3. Do not rediscover Phase 3's failure modes.
+
+Between phases, print a one-line transition: what came out, what goes in next.
+
+## Deciding as you go
+
+Apply the decision-rights rules above to every question the underlying skills
+would have asked. In this pipeline specifically:
+
+- **MECHANICAL and TEAM**: decide, record, and carry on. Story shape, estimates,
+  test levels, edge-case selection, automation ordering.
+- **PRODUCT OWNER**: never decide. Accumulate these and present them at the gate.
+  Scope cuts, acceptance-criteria changes, anything that alters what the team is
+  committing to.
+- **TRAIN**: never decide, and surface immediately rather than at the gate — a
+  cross-team dependency found in Phase 1 changes Phase 2's arithmetic, so
+  holding it back would make the rest of the pipeline wrong.
+- **CHALLENGE**: if you think the feature itself is the wrong thing to build,
+  say so once, at the gate, in the form the decision-rights section describes.
+
+## The gate
+
+Stop at the end and present:
+
+```
+## Plan complete: <feature>
+
+### What the plan says
+<3-5 sentences: the stories, the shape, the approach>
+
+### Decided for you (N)
+| # | Class | Decision | Why |
+<MECHANICAL and TEAM decisions, most consequential first>
+
+### Needs your call (N)
+| # | Class | Question | Options | Recommendation |
+<PRODUCT_OWNER and TRAIN items - these block nothing technically,
+ but the plan is not committed until a person answers them>
+
+### Verdict: LOCKED or BLOCKED
+<from Phase 3; if BLOCKED, the named blockers>
+
+### Open questions
+```
+
+Then ask whether to accept the plan, change any of the decisions, or answer the
+escalations. Do not proceed past the gate on your own.
+
+## Do not
+
+- Do not skip a phase because it looks unnecessary. If a phase genuinely does
+  not apply, run it far enough to say what you checked and why it does not.
+- Do not compress a phase into a summary. A one-line "architecture looks fine"
+  is a skipped phase wearing a phase's name.
+- Do not decide a PRODUCT OWNER or TRAIN question to keep the pipeline moving.
+  An unanswered escalation is a finished pipeline; a quietly-taken decision is
+  a broken one.
+- Do not let a BLOCKED verdict from Phase 3 become a warning. Blocked means
+  build has not been cleared.
