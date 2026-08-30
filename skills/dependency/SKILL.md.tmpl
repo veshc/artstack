@@ -1,0 +1,96 @@
+---
+name: dependency
+version: 0.5.0
+preamble-tier: 3
+description: Track what this team needs from another team on the train as an object with state rather than a line in a document - raise it, move it through requested, committed, at-risk and delivered, and see what has been sitting unanswered. Use when work depends on another team, when asked what is blocking a story, or when preparing for an ART sync or planning event. (artstack)
+argument-hint: "[add|list|board] [--on <team>] [--what \"...\"] [--by <iteration>]"
+triggers:
+  - we need something from another team
+  - what is blocking this story
+  - track this dependency
+  - which teams are we waiting on
+allowed-tools:
+  - Bash
+  - Read
+  - Grep
+  - Glob
+---
+
+{{PREAMBLE}}
+
+{{TRACKER_READONLY}}
+
+{{DECISION_RIGHTS}}
+
+# /dependency (train level)
+
+A cross-team dependency written in a planning document is prose: it has no
+state, nobody is notified when it slips, and it is refreshed once an interval by
+whoever remembers. A dependency that quietly stayed "requested" for six weeks is
+one of the most common ways a planning interval misses, and prose cannot tell
+you that happened.
+
+This makes it an object with a state and a history.
+
+Input: $ARGUMENTS
+
+## The states
+
+| State | Means |
+|---|---|
+| `requested` | We have asked. **The other team has not agreed.** |
+| `committed` | They agreed, with a date. |
+| `at-risk` | Committed, and the date is now in danger. |
+| `delivered` | It arrived and we confirmed it. |
+| `dropped` | No longer needed, or refused. |
+
+The distinction that matters is `requested` versus `committed`. A team that
+believes a dependency is handled because it is written down, when the owning
+team has never agreed, is the exact failure this exists to surface.
+
+## Raising one
+
+Before recording anything, get four things. If you cannot, ask rather than
+guess:
+
+1. **Which team.** Named, from the train file. Not "the platform team" if the
+   train file calls them something else.
+2. **What exactly.** A specific, testable thing. "API support" is not a
+   dependency; "a versioned `payment.status.v2` event with the old field
+   retained" is.
+3. **By when.** An iteration, tied to why: what this team cannot finish without
+   it.
+4. **What happens if it does not arrive.** If the answer is "nothing much", it
+   is not a dependency and recording it as one adds noise to the board.
+
+```bash
+_AS="$(cat "$HOME/.artstack/checkout-path" 2>/dev/null || true)"
+"$_AS/bin/artstack-dependency" add --on <team> --what "<specific thing>" \
+    --by <iteration> --item <work item> --why "<what it blocks>"
+```
+
+## Moving one
+
+Only record `committed` when the owning team **actually agreed** — in a
+planning event, an ART sync, or a written reply. Do not record agreement you
+inferred from silence, and do not record it because a date passed and it seems
+likely. A board full of optimistic states is worse than no board.
+
+```bash
+"$_AS/bin/artstack-dependency" set <id> --state committed --note "agreed at ART sync 12 Mar"
+```
+
+## Reviewing
+
+`board` shows everything with counts. Report anything still `requested`, and say
+how long it has been there. Then say who should chase it and what to ask.
+
+## Do not
+
+- Do not record `committed` on the strength of an assumption. That is the one
+  entry that makes this actively harmful.
+- Do not create a dependency for work inside this team. That is a story.
+- Do not contact another team, comment in their tracker, or file anything
+  against them. You record what this team believes; a human does the asking.
+- Do not delete a dependency to tidy the board. Move it to `dropped` with a
+  reason, so the history stays readable at the retrospective.

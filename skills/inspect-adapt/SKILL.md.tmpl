@@ -1,0 +1,106 @@
+---
+name: inspect-adapt
+preamble-tier: 3
+version: 0.5.0
+description: Prepare an inspect and adapt session from what actually happened during the planning interval - objectives met against committed, dependency slippage, defect and rework patterns, and problems worth a problem-solving workshop with evidence rather than opinion. Use at the end of a planning interval, when preparing an I and A, or for a retrospective that needs data behind it. (artstack)
+argument-hint: "[--since <interval start>] [--repos <file listing team repos>]"
+triggers:
+  - prepare inspect and adapt
+  - end of pi retrospective
+  - how did the planning interval go
+  - what should we fix next interval
+allowed-tools:
+  - Bash
+  - Read
+  - Grep
+  - Glob
+---
+
+{{PREAMBLE}}
+
+{{TRACKER_READONLY}}
+
+{{DECISION_RIGHTS}}
+
+# /inspect-adapt (train level)
+
+You prepare the evidence for an inspect and adapt session. Not the conclusions:
+the evidence. The session's value comes from people who were there arguing about
+what happened, and a report that arrives with the answers already decided
+shortens the meeting by removing the part that mattered.
+
+Input: $ARGUMENTS
+
+## Before you start
+
+1. Read the train file: the objectives committed this interval, the dates, and
+   the definition of done.
+2. Assemble what was recorded:
+   ```bash
+   _AS="$(cat "$HOME/.artstack/checkout-path" 2>/dev/null || true)"
+   "$_AS/bin/artstack-cadence" 2>/dev/null || true
+   "$_AS/bin/artstack-roll" ${REPOS:+--repos "$REPOS"} --since <interval length>
+   "$_AS/bin/artstack-roll" --objectives ${REPOS:+--repos "$REPOS"}
+   "$_AS/bin/artstack-dependency" board
+   ```
+3. Say up front what the data does not cover. Teams that do not use ArtStack are
+   invisible here, and their absence is not a finding about them.
+
+## What to assemble
+
+1. **Objectives, committed against met.** For each: committed or stretch, what
+   the teams recorded against it, and whether it was met, partially met, or not.
+   Where the evidence is thin, say the evidence is thin rather than grading it
+   anyway.
+2. **Dependency reality.** How many were raised, how many reached `committed`,
+   how many were actually `delivered`, and how long things sat in `requested`.
+   The gap between raised and committed is usually the most useful number in the
+   whole report.
+3. **Quality signal.** Defects raised, reviews that returned REQUEST_CHANGES,
+   verifications that returned NOT WORKING, and rework — stories touched again
+   after being called done. Report the counts and the shape, not a verdict on
+   any team.
+4. **Flow.** Where work waited. Long gaps between a story's first record and its
+   ship record, escalations that sat unanswered, dependencies that blocked.
+5. **Problems worth the workshop.** Three to five, each stated as a problem with
+   evidence attached, in the form a problem-solving workshop can start from:
+   what happened, how often, what it cost. Not a root cause: the workshop finds
+   that.
+
+## The rule about blame
+
+Report patterns, never people. "Four stories were reopened after being called
+done, all in the payment area" is useful. "Team Falcon has a quality problem" is
+an accusation that will make the next interval's data worse, because people who
+are graded by a tool stop feeding it. Individual names appear nowhere in this
+output, even though the ledger records an actor.
+
+## Output format
+
+```
+## What this data covers, and what it misses
+## Objectives: committed vs met
+| Objective | Committed/Stretch | Evidence | Met |
+## Dependencies
+| Raised | Committed | Delivered | Longest wait in requested |
+## Quality
+| Signal | Count | Notable pattern |
+## Where work waited
+## Problems worth the workshop
+  ### <problem, stated as a problem>
+  Evidence: <what was recorded>
+  Frequency: <how often>
+  Cost: <what it cost, in time, rework, or a missed objective>
+## Questions I would put to the room
+## Open questions
+```
+
+## Do not
+
+- Do not name individuals or grade teams against each other.
+- Do not present a root cause. The workshop does that, with the people who were
+  there and the context the ledger does not hold.
+- Do not compute a percentage of objectives met unless every objective has real
+  evidence. A confident number over thin data is worse than a stated gap.
+- Do not propose the improvement items. Bring the problems; the train decides
+  what to do about them.

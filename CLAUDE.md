@@ -101,6 +101,39 @@ bin/artstack-preflight               # is it safe to write here right now
 ./test/ledger.sh                     # substrate tests
 ```
 
+## The train layer
+
+One train, many teams, and the roll-up reads what each team already commits.
+
+```bash
+bin/artstack-roll                      # every team in this repo
+bin/artstack-roll --repos teams.txt    # across the train's repositories
+bin/artstack-roll --objectives         # objective coverage instead of activity
+bin/artstack-dependency board          # cross-team dependencies with state
+bin/artstack-decide --open             # what is waiting on a human
+bin/artstack-cadence                   # where today sits in the interval
+```
+
+**The roll-up is honest about its inputs before it shows a number.** It reads
+only what teams committed and pushed, so a team working locally is invisible and
+a stale checkout looks idle. It lists every repository it read and how fresh the
+newest record was, and it says plainly that it is not a status anyone signed
+off. An RTE who knows two teams are missing can go and ask; one who cannot tell
+will believe the picture.
+
+**Dependencies are objects, not prose.** `requested` means we asked and nobody
+agreed; `committed` means they actually agreed. That distinction is the point:
+a team that believes a dependency is handled because it is written down, when
+the owning team never agreed, is the failure this exists to catch. Transitions
+append rather than overwrite, so how long something sat unanswered is readable
+at the retrospective.
+
+**JSON is read with `artstack-json`.** awk pattern-matching is not parsing, and
+it gets escapes and unicode wrong silently — fine for one branch's dashboard,
+not fine for aggregating across teams. It uses `python3` when it is already on
+the machine and falls back to awk when it is not. Nothing is installed either
+way: the no-captive-tooling rule holds.
+
 ## Two agents, one working tree
 
 `build` and `setup` refuse to write when `artstack-preflight` reports content
