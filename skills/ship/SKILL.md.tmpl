@@ -1,0 +1,109 @@
+---
+name: ship
+preamble-tier: 4
+version: 0.4.0
+description: Get a finished branch ready to land on a train - merge the base branch, run the tests, check the story's acceptance criteria and the readiness dashboard, then push and open a pull request for human review. Never merges and never pushes to a protected branch. Use when work is done and needs a PR, when asked to ship, land, or raise a pull request. (artstack)
+argument-hint: "[story id; defaults to the current branch's work]"
+triggers:
+  - ship this
+  - open a pull request
+  - this is ready to land
+  - raise the pr
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Edit
+  - Grep
+  - Glob
+  - AskUserQuestion
+---
+
+{{PREAMBLE}}
+
+{{TRACKER_READONLY}}
+
+{{DECISION_RIGHTS}}
+
+{{GIT_WORKFLOW}}
+
+{{LEDGER}}
+
+# /ship (engineer track)
+
+You prepare the branch and open the pull request. You do not land it. On a train
+the merge belongs to the humans who own the gate, and this skill exists to make
+their review cheap rather than to bypass it.
+
+This is the one place ArtStack's difference from a solo tool matters most. A
+solo workflow ships to main because there is nobody else to ask. Here there is
+always somebody else, and the gate is the point.
+
+Input: $ARGUMENTS
+
+## Pre-flight, in order. Stop at the first hard failure.
+
+1. **Branch check.** On the default branch or a release branch, stop: work
+   ships from a feature branch. Do not offer to create one and move the changes
+   for them; that is a decision about where their work belongs.
+2. **Readiness.** Run the dashboard for this branch and this team. Report what
+   is CURRENT, STALE and missing. A STALE `/review` is not a blocker but it is
+   stated plainly at the top of the pull request body.
+3. **Open escalations.** Run `artstack-decide --open`. Anything unanswered goes
+   in the pull request body under a heading the reviewer cannot miss. A
+   PRODUCT_OWNER or TRAIN question that nobody answered is exactly what review
+   is for; hiding it defeats the purpose of having recorded it.
+4. **Merge the base branch first**, then run the tests, so they run against what
+   will actually land. Conflicts you cannot resolve mechanically stop the
+   workflow: say which files and hand over.
+5. **Run the tests.** All of them, or the suites the team's file nominates. A
+   failure that existed before your branch is triaged and reported, not treated
+   as yours; a failure your branch introduced stops the workflow.
+6. **Acceptance criteria.** Check the change against the story, criterion by
+   criterion. An unmet criterion does not stop the pull request, but it is
+   stated in the body. Shipping something the story does not describe is how a
+   demo goes wrong two weeks later.
+
+## Opening the pull request
+
+Push the feature branch. Then open the pull request against the base branch with
+a body that answers what a reviewer on a train actually needs:
+
+```
+## What this does
+<the change in 3-5 sentences, in terms of user-visible behaviour>
+
+## Story
+<id, title, and criterion-by-criterion status>
+
+## Cross-team impact
+<contracts, schemas, events touched, and which teams consume them;
+ "none" only after checking the train file's dependency table>
+
+## Readiness
+<the dashboard: what ran, against this content or not>
+
+## Needs a decision
+<open escalations from artstack-decide, with the recommendation>
+
+## Tests
+<what ran, what passed, what was already failing before this branch>
+
+## Risk
+<what to watch after this lands, and what would tell you it went wrong>
+```
+
+Record the result in the ledger. Report the pull request URL.
+
+## Do not
+
+- **Never merge the pull request.** Not with an approval, not when CI is green,
+  not when the change is trivial, not when asked to "just land it". The human
+  gate is not a formality you can waive on their behalf.
+- **Never push to the default, a release, or any protected branch.**
+- Never force-push a branch you did not create in this session.
+- Never modify CI configuration to make a check pass.
+- Never weaken or skip a test to get a green run. Report it.
+- Never open the pull request while a test your branch broke is failing.
+- Do not suppress an open escalation or a stale review to make the pull request
+  look cleaner. The body is for the reviewer, not for you.

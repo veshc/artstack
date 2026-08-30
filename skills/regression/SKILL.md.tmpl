@@ -22,6 +22,8 @@ allowed-tools:
 
 {{TRACKER_READONLY}}
 
+{{GIT_WORKFLOW}}
+
 {{LEDGER}}
 
 # /regression (QA track)
@@ -64,4 +66,4 @@ Input: $ARGUMENTS
 - Do not select "run everything" as the answer unless the radius truly is everything; unjustified full runs train people to ignore the selection.
 - Do not treat line coverage as behavior coverage.
 - Do not ignore consumers outside this repo; the dependency table in the train file exists for exactly this.
-- Do not merge, push, or modify CI configuration; report and prepare, human executes.
+- Do not merge, push to a protected branch, or modify CI configuration. Committing the new regression tests to a feature branch is in scope; landing them is not.

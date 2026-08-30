@@ -1,0 +1,99 @@
+---
+name: investigate
+preamble-tier: 4
+version: 0.4.0
+description: Find the root cause of a failure before changing anything - reproduce it, trace the data, form and test one hypothesis at a time, and stop after three failed fixes rather than thrashing. Use when something is broken, a test fails intermittently, behaviour makes no sense, a bug needs diagnosing, or a fix attempt has already failed once. (artstack)
+argument-hint: <failure description, failing test, log excerpt, or stack trace>
+triggers:
+  - why is this broken
+  - this test keeps failing
+  - debug this
+  - find the root cause
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Edit
+  - Grep
+  - Glob
+---
+
+{{PREAMBLE}}
+
+{{TRACKER_READONLY}}
+
+{{DECISION_RIGHTS}}
+
+{{GIT_WORKFLOW}}
+
+{{LEDGER}}
+
+# /investigate (engineer track)
+
+You find out what is actually wrong before anything changes. The failure mode
+this exists to prevent is the confident fix that makes the symptom go away and
+leaves the cause in place, which on a train resurfaces two iterations later in
+someone else's code with none of the context.
+
+Input: $ARGUMENTS
+
+## The rule
+
+**No fix without a reproduction and a mechanism.** You must be able to make it
+fail on demand, and you must be able to say why it fails in terms of the code,
+before you edit anything. "This looks wrong, let me try changing it" is how a
+codebase accumulates changes nobody can explain.
+
+If you genuinely cannot reproduce it, say so and stop with what the evidence
+supports. An honest "not reproduced, here is what I ruled out" beats a
+speculative fix.
+
+## Process
+
+1. **Reproduce.** Get it failing on demand: exact command, environment, data
+   preconditions, and how often it fails. An intermittent failure needs a
+   measured rate, not "sometimes".
+2. **Establish the boundary.** When did it last work? Bisect if history allows.
+   Narrow it in space too: which layer, which module, which call.
+3. **Trace the data.** Follow the actual values through the failing path. Print,
+   log, or step, but observe rather than assume. Most bugs are a value that is
+   not what everyone believes it is.
+4. **One hypothesis at a time.** State it, predict what you would observe if it
+   were true, then test that prediction specifically. Changing three things and
+   seeing the failure vanish teaches you nothing about which one mattered.
+5. **Stop after three.** Three failed fix attempts means the model of the
+   problem is wrong, not that the fourth attempt will work. Go back to tracing,
+   or hand over with everything you learned. Say plainly that you are stopping
+   and why.
+6. **Fix the cause.** Then prove it: the reproduction no longer reproduces, and
+   a regression test fails without the fix and passes with it. A fix without
+   that test is a fix that comes back.
+7. **Check the blast radius.** Does the same mistake exist elsewhere? A root
+   cause usually has siblings. Report them even when you do not fix them.
+
+## Output format
+
+```
+## Symptom
+## Reproduction
+  <exact steps, frequency, environment>
+## Root cause
+  <the mechanism, in terms of the code, with file:line>
+  Confidence: high | medium | low, because ...
+## Hypotheses tested and rejected
+  <what you thought, what you observed, why it was wrong>
+## The fix
+  <what changed and why this addresses the cause, not the symptom>
+## Regression test
+  <the test, and confirmation it fails without the fix>
+## Same mistake elsewhere
+## Open questions
+```
+
+## Do not
+
+- Do not fix a symptom you cannot explain.
+- Do not change unrelated code you noticed on the way. Note it; leave it.
+- Do not keep trying after three failures. Hand over what you learned.
+- Do not report a cause with high confidence on a hypothesis you did not test.
+- Do not delete or weaken the test that caught it.

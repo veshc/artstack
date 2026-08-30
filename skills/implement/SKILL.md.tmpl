@@ -1,0 +1,107 @@
+---
+name: implement
+preamble-tier: 4
+version: 0.4.0
+description: Build a story against a locked technical plan - read the plan and the acceptance criteria first, write the code and its tests together, run them, and land the work as small atomic commits on a feature branch. Use when asked to implement a story, build a feature, write the code for a ticket, or turn a locked plan into working software. (artstack)
+argument-hint: <story id, or a description of what to build>
+triggers:
+  - implement this story
+  - build this feature
+  - write the code for this
+  - turn this plan into code
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Edit
+  - Grep
+  - Glob
+  - AskUserQuestion
+---
+
+{{PREAMBLE}}
+
+{{TRACKER_READONLY}}
+
+{{DECISION_RIGHTS}}
+
+{{GIT_WORKFLOW}}
+
+{{LEDGER}}
+
+# /implement (engineer track)
+
+You build the story. Not a sketch of it, not the happy path with the edge cases
+left as comments: the thing the acceptance criteria describe, with the tests
+that prove it, on a feature branch, in commits a reviewer can follow.
+
+Input: $ARGUMENTS
+
+## Before you write anything
+
+1. **Get the acceptance criteria.** From the tracker if connected, from a
+   `/pi-prep` artifact if one exists, or from the human. Without them you are
+   guessing at done. If they are missing, say so and ask; do not invent them.
+2. **Read the locked plan.** If `/arch-runway` ran for this item, read its
+   artifact and build what it locked. If it returned BLOCKED, stop: build has
+   not been cleared. Say which blockers are outstanding.
+3. **Read the surrounding code before adding to it.** Match the patterns that
+   are already there: error handling, logging, naming, layering, test style.
+   A change that works but reads foreign to the file is a change a reviewer has
+   to argue with.
+4. **Check the branch.** If you are on the default or a release branch, create a
+   feature branch first, named per the team's convention.
+
+## Building
+
+1. **Slice the work.** Break the story into changes that each leave the tree
+   working and tested. A commit that only compiles because the next one lands
+   is not a slice.
+2. **Code and tests together, in the same commit.** Not tests afterwards, not
+   tests in a follow-up. The test is how you know the criterion is met, so it
+   belongs with the code that meets it.
+3. **Cover what the plan named.** The edge cases and failure modes from
+   `/arch-runway`, the NFRs from the train file, the criteria from the story.
+   If a criterion cannot be tested as written, that is a finding about the
+   criterion, and it goes to the product owner rather than being quietly
+   dropped.
+4. **Run everything you touched.** The new tests and the existing suite around
+   them. Never present work you have not run. If the environment cannot run
+   them, say exactly that rather than implying they passed.
+5. **Stop at three.** If a test fails and three attempts have not fixed it, stop
+   and switch to `/investigate`. Repeated blind attempts destroy more than they
+   fix, and the fourth one is where the collateral damage starts.
+
+## Landing
+
+Commit as you go, in small atomic commits with messages naming the work item.
+Do not accumulate the whole story in the working tree and commit at the end;
+that produces one unreviewable change and loses the reasoning.
+
+Push the feature branch. Do not open the pull request here - that is `/ship`,
+which runs the review and the checks first.
+
+## Output format
+
+```
+## What was built
+| Change | Files | Tests | Status |
+## Acceptance criteria
+  <criterion by criterion: met, partially met with what remains, or not met>
+## Commits
+  <hash and subject, in order>
+## What I did not do and why
+## Open questions
+```
+
+## Do not
+
+- Do not weaken or delete an existing test to make a suite green. That is a
+  finding to report, not a fix to apply.
+- Do not implement past the story. Adjacent improvements you noticed go in Open
+  questions, not in the diff.
+- Do not change a public interface another team consumes without routing it as
+  a TRAIN decision first.
+- Do not merge, push to a protected branch, or open the pull request.
+- Do not report a story as complete when a criterion is unmet. Partial is a
+  legitimate result; misreported is not.

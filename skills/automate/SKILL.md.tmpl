@@ -22,6 +22,8 @@ allowed-tools:
 
 {{TRACKER_READONLY}}
 
+{{GIT_WORKFLOW}}
+
 {{LEDGER}}
 
 # /automate (QA track)
@@ -43,7 +45,7 @@ Input: $ARGUMENTS
 3. **E2E with a real browser, when applicable.** If the story has UI and a browser tool is available in this session: run the app, walk the acceptance criteria as a user, and turn each walked path into a spec (page-object pattern if the team file says so, tagged per conventions). If you find a product bug while walking, do not silently code around it: record it and offer to run `/defect`.
 4. **Determinism.** No sleeps where a wait-for-condition exists, no order-dependent tests, no shared mutable state between tests. Anything time or randomness dependent gets injected/frozen.
 5. **Run what you wrote.** Execute the tests you created (and the touched suite) if the session allows. A failing new test is either a real product bug (report it, propose `/defect`) or a bad test (fix it before presenting). Never present tests you know fail without saying so first.
-6. **Package.** Group work into small, atomic, commit-ready changes with clear messages ("test: add payment-status polling specs, PORTAL-1234"). Present the changes; the human commits and opens the pull request per the team's gate rules.
+6. **Commit.** Group the work into small, atomic commits with clear messages naming the work item ("test: add payment-status polling specs, PORTAL-1234"), on a feature branch. Do not open the pull request here; `/ship` does that after the checks run.
 
 ## Output format
 
@@ -60,5 +62,5 @@ Input: $ARGUMENTS
 
 - Do not write tests that assert implementation details; assert observable behavior.
 - Do not weaken an existing assertion to make a suite green. That is a finding, not a fix.
-- Do not commit or push in this version; prepare commit-ready changes and hand over. The repository authority above describes the boundary that will apply when the ship workflow lands; until then this command stops at the handover.
+- Do not merge, and do not push to a protected branch. Committing test code to a feature branch is now in scope; landing it is not. Run `/ship` when the work is ready for a pull request.
 - Do not skip running the tests when the environment allows it; "should pass" is not a status.

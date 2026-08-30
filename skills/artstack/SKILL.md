@@ -120,6 +120,10 @@ the train's ground rules; an ad-hoc answer carries none of them.
   `/feature-review`
 
 **Architecture and build**
+- Implement a story, build a feature, "write the code for this", turn a locked
+  plan into working software → `/implement`
+- Something is broken, a test fails, behaviour makes no sense, "why is this
+  happening", a fix already failed once → `/investigate`
 - Review a technical plan, lock the approach, "does this design work", runway
   fit, data flow, NFR compliance, before code starts → `/arch-runway`
 - Review code, check a diff or a branch or a PR, "look at my changes", pre-PR
@@ -134,6 +138,12 @@ the train's ground rules; an ad-hoc answer carries none of them.
   is not covered → `/regression`
 - Something broke, a test failed, a log or screenshot shows a failure, "write
   this up" → `/defect`
+
+**Landing**
+- Work is finished and needs a pull request, "ship this", "land it", "raise the
+  PR" → `/ship`
+- Something was deployed and needs checking in the real environment, "did it
+  work", post-deploy verification → `/verify`
 
 **Demo**
 - Prepare a system demo, "what are we showing", demo script, end of iteration →

@@ -1,0 +1,100 @@
+---
+name: verify
+preamble-tier: 4
+version: 0.4.0
+description: Check that something which landed actually works in the environment it landed in - walk the acceptance criteria against the running system, look for errors and regressions the tests could not catch, and say plainly whether it is working or should be rolled back. Use after a deploy, when asked whether a change worked in an environment, or before declaring a story done. (artstack)
+argument-hint: <environment or URL> [story id]
+triggers:
+  - did the deploy work
+  - verify this in staging
+  - check it in production
+  - is it working after the release
+allowed-tools:
+  - Bash
+  - Read
+  - Grep
+  - Glob
+---
+
+{{PREAMBLE}}
+
+{{TRACKER_READONLY}}
+
+{{DECISION_RIGHTS}}
+
+{{LEDGER}}
+
+# /verify (engineer track)
+
+A change that passed CI and reached an environment is not yet a change that
+works. You check the running system against what the story promised, and you
+report what you actually observed.
+
+The definition of done on most trains includes working in an environment, not
+merging. This is the skill that produces the evidence for that claim.
+
+Input: $ARGUMENTS
+
+## Before you start
+
+1. Get the story and its acceptance criteria, and the `/ship` record for what
+   landed. You are verifying specific claims, not forming a general impression.
+2. Identify the environment precisely: which one, which version or build is
+   deployed there, and when it deployed. Verifying the wrong build is worse than
+   not verifying, because it produces false confidence.
+3. Note from the train file which NFRs apply. Performance budgets and audit
+   requirements are verified here, not asserted.
+
+## Checking
+
+1. **Walk each acceptance criterion against the running system.** Not the code,
+   not the test suite: the system. State for each one what you did, what you
+   observed, and whether it matches. Where you cannot check a criterion in this
+   environment, say so rather than marking it met.
+2. **Look where the tests do not.** Console and server errors, degraded response
+   times against the stated budget, broken states that only appear with real
+   data, anything logged at error level since the deploy.
+3. **Check the blast radius.** The things that were working before and share
+   code, data or contracts with what changed. A regression in a neighbouring
+   flow is the most common way a green deploy turns out to be bad.
+4. **Check cross-team consumers.** If this change touched a published contract,
+   confirm the consuming teams named in the train file still work. This is the
+   failure that hurts most and surfaces slowest.
+
+## The verdict
+
+State one of three, plainly:
+
+- **WORKING** — every criterion checked and met, no new errors, no regression
+  found. Say what you checked so the claim can be judged.
+- **WORKING WITH ISSUES** — the change does what it promised, and you found
+  problems worth a defect. List them by severity; offer `/defect`.
+- **NOT WORKING** — a criterion is unmet, or something that worked before is
+  broken. Say what a rollback would cost and what evidence would confirm the
+  diagnosis. Rolling back is a human decision; you provide the case.
+
+## Output format
+
+```
+## Environment and build verified
+## Verdict: WORKING | WORKING WITH ISSUES | NOT WORKING
+## Acceptance criteria
+| Criterion | How checked | Observed | Met |
+## Errors and regressions found
+## Cross-team consumers checked
+## NFRs
+| NFR | Measured | Budget | Pass |
+## What I could not verify here and why
+## Open questions
+```
+
+## Do not
+
+- Do not verify by reading the code. If you cannot reach the environment, say
+  so; a code review is not a verification and calling it one is worse than
+  admitting the gap.
+- Do not report WORKING on criteria you could not check.
+- Do not fix what you find. Report it, and offer `/defect` or `/investigate`.
+  A fix applied during verification invalidates the verification.
+- Do not roll back, redeploy, restart, or change configuration. Those are
+  operational decisions with owners.
