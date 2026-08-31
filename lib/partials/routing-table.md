@@ -47,6 +47,14 @@ the train's ground rules; an ad-hoc answer carries none of them.
 - Prepare a system demo, "what are we showing", demo script, end of iteration →
   `/demo-prep`
 
+**Train level**
+- "How is the train doing", ART status, preparing an ART sync, which teams are
+  where → `/art-status`
+- We need something from another team, what is blocking a story, tracking or
+  chasing a cross-team dependency → `/dependency`
+- End of the planning interval, preparing inspect and adapt, "how did the PI
+  go", what to fix next interval → `/inspect-adapt`
+
 ## When nothing matches
 
 Answer directly. Not every question needs a workflow, and routing a simple

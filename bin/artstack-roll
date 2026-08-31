@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# artstack-roll - the train view, aggregated across teams and repositories.
+#
+# Usage:
+#   artstack-roll                       # this repo, every team
+#   artstack-roll --repos <file>        # a file of repo paths, one per line
+#   artstack-roll --since 14d           # only recent records
+#   artstack-roll --objectives          # objective coverage instead of activity
+#
+# Who this is for. The RTE, and the System Team when it needs to know what has
+# actually been verified across the train. Everyone else has the per-team
+# dashboard, which is a better tool for their question.
+#
+# What it can and cannot see. It reads the ledgers each team already commits to
+# their own repository, so it is only as current as the last push and only as
+# complete as the list of repos it was given. It never invents a team it has
+# not seen a record from, and it says how stale its inputs are rather than
+# presenting a confident view built on a fortnight-old checkout. An honest
+# partial view is the point: an RTE who knows two teams are missing can go and
+# ask, while one who cannot tell will believe the picture.
+#
+# Repo list format: one path per line, blank lines and # comments ignored.
+# Default is the current repo alone.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+REPOS_FILE=""
+SINCE=""
+MODE="activity"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repos) REPOS_FILE="${2:-}"; shift 2 ;;
+    --since) SINCE="${2:-}"; shift 2 ;;
+    --objectives) MODE="objectives"; shift ;;
+    --help|-h) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "artstack-roll: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+# Cut-off for --since Nd. Portable across BSD and GNU date by doing the
+# arithmetic in seconds rather than relying on either one's relative-date flag.
+CUTOFF=""
+if [ -n "$SINCE" ]; then
+  case "$SINCE" in
+    *d) DAYS="${SINCE%d}" ;;
+    *)  DAYS="$SINCE" ;;
+  esac
+  case "$DAYS" in ''|*[!0-9]*) echo "artstack-roll: --since takes days, e.g. 14d" >&2; exit 2 ;; esac
+  NOW=$(date -u +%s)
+  CUTOFF=$(date -u -r $((NOW - DAYS * 86400)) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d "@$((NOW - DAYS * 86400))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)
+fi
+
+REPOS=""
+if [ -n "$REPOS_FILE" ]; then
+  [ -f "$REPOS_FILE" ] || { echo "artstack-roll: no such file: $REPOS_FILE" >&2; exit 2; }
+  REPOS="$(grep -vE '^[[:space:]]*(#|$)' "$REPOS_FILE" || true)"
+else
+  REPOS="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+fi
+
+[ -n "$REPOS" ] || { echo "artstack-roll: no repositories to read"; exit 0; }
+
+TMP="$(mktemp "${TMPDIR:-/tmp}/artstack-roll-XXXXXX")"
+trap 'rm -f "$TMP" "$TMP.deps" "$TMP.meta"' EXIT
+: > "$TMP"; : > "$TMP.deps"; : > "$TMP.meta"
+
+REPO_COUNT=0
+MISSING=0
+while IFS= read -r repo; do
+  [ -n "$repo" ] || continue
+  REPO_COUNT=$((REPO_COUNT + 1))
+  state="$repo/.artstack"
+  if [ ! -d "$state" ]; then
+    MISSING=$((MISSING + 1))
+    printf 'missing\t%s\n' "$repo" >> "$TMP.meta"
+    continue
+  fi
+  # How stale is this input? The newest record we can see from it.
+  newest=""
+  if [ -d "$state/ledger" ]; then
+    for f in "$state"/ledger/*.jsonl; do
+      [ -f "$f" ] || continue
+      cat "$f" >> "$TMP"
+      last="$(tail -1 "$f" | "$SCRIPT_DIR/artstack-json" fields ts 2>/dev/null || true)"
+      [ "$last" \> "$newest" ] && newest="$last"
+    done
+  fi
+  [ -f "$state/train/dependencies.jsonl" ] && cat "$state/train/dependencies.jsonl" >> "$TMP.deps"
+  printf 'seen\t%s\t%s\n' "$repo" "${newest:-none}" >> "$TMP.meta"
+done <<EOF
+$REPOS
+EOF
+
+echo ""
+echo "ART roll-up"
+echo "==============================================================================="
+
+# Input honesty first, before any numbers. A view built on stale or partial
+# inputs is worse than no view if the reader cannot tell.
+echo ""
+echo "Inputs"
+awk -F'\t' '
+  $1 == "seen"    { printf "  %-50s newest record: %s\n", $2, $3 }
+  $1 == "missing" { printf "  %-50s NO .artstack STATE\n", $2 }
+' "$TMP.meta"
+if [ "$MISSING" -gt 0 ]; then
+  echo ""
+  echo "  $MISSING of $REPO_COUNT repositories have no ArtStack state."
+  echo "  Everything below is missing whatever those teams did."
+fi
+
+TOTAL="$(grep -c . "$TMP" 2>/dev/null || echo 0)"
+if [ "$TOTAL" -eq 0 ]; then
+  echo ""
+  echo "No records found. Nothing to report, rather than an empty train."
+  exit 0
+fi
+
+if [ "$MODE" = "objectives" ]; then
+  echo ""
+  echo "Objective coverage"
+  echo "-------------------------------------------------------------------------------"
+  "$SCRIPT_DIR/artstack-json" fields objective,team,command,ts < "$TMP" \
+  | awk -F'\t' -v cutoff="$CUTOFF" '
+    { if (cutoff != "" && $4 < cutoff) next
+      o = ($1 == "" ? "(no objective named)" : $1)
+      seen[o]++; teams[o "\t" $2] = 1 }
+    END {
+      if (length(seen) == 0) { print "  No records name an objective."; exit }
+      for (o in seen) {
+        n = 0
+        for (k in teams) { split(k, p, "\t"); if (p[1] == o) n++ }
+        printf "  %-45s %3d record(s), %d team(s)\n", substr(o,1,45), seen[o], n
+      }
+      print ""
+      print "  Records with no objective are work nobody can tie to a commitment."
+    }'
+  exit 0
+fi
+
+echo ""
+echo "Activity by team"
+echo "-------------------------------------------------------------------------------"
+"$SCRIPT_DIR/artstack-json" fields team,command,verdict,ts,branch < "$TMP" \
+| awk -F'\t' -v cutoff="$CUTOFF" '
+  {
+    if (cutoff != "" && $4 < cutoff) next
+    t = ($1 == "" ? "(no team)" : $1)
+    total[t]++
+    if ($2 == "review")  { rev[t]++; if ($3 == "REQUEST_CHANGES") blocked[t]++ }
+    if ($2 == "ship")    ship[t]++
+    if ($2 == "verify")  { ver[t]++; if ($3 == "NOT WORKING") broke[t]++ }
+    if ($2 == "defect")  def[t]++
+    if ($4 > last[t]) last[t] = $4
+  }
+  END {
+    printf "  %-14s %6s %7s %6s %7s %7s  %s\n", "TEAM", "RECS", "REVIEWS", "SHIPS", "VERIFY", "DEFECTS", "LAST SEEN"
+    for (t in total)
+      printf "  %-14s %6d %7d %6d %7d %7d  %s\n", substr(t,1,14), total[t], rev[t]+0, ship[t]+0, ver[t]+0, def[t]+0, substr(last[t],1,10)
+    print ""
+    for (t in blocked) if (blocked[t] > 0) printf "  %s has %d review(s) at REQUEST_CHANGES\n", t, blocked[t]
+    for (t in broke)   if (broke[t] > 0)   printf "  %s has %d verification(s) at NOT WORKING\n", t, broke[t]
+    if (("(no team)" in total))
+      printf "\n  %d record(s) carry no team and cannot be attributed.\n", total["(no team)"]
+  }'
+
+if [ -s "$TMP.deps" ]; then
+  echo ""
+  echo "Cross-team dependencies"
+  echo "-------------------------------------------------------------------------------"
+  "$SCRIPT_DIR/artstack-json" fields id,on_team,from_team,state,needed_by,transition < "$TMP.deps" \
+  | awk -F'\t' '
+    { if ($6 == "true") { st[$1] = $4; next }
+      on[$1]=$2; fr[$1]=$3; by[$1]=$5; if (!($1 in st)) st[$1]=$4; ids[++n]=$1 }
+    END {
+      if (n == 0) { print "  none recorded"; exit }
+      for (i=1;i<=n;i++) { id=ids[i]; c[st[id]]++
+        if (st[id] == "requested" || st[id] == "at-risk")
+          printf "  %-12s %s -> %-10s %-10s by %s\n", id, fr[id], on[id], st[id], (by[id]==""?"-":by[id])
+      }
+      print ""
+      for (s in c) printf "  %s: %d\n", s, c[s]
+      if (c["requested"] > 0) print "\n  REQUESTED means nobody has agreed yet. On a train that is not a plan."
+    }'
+fi
+
+echo ""
+echo "==============================================================================="
+echo "This is a report assembled from what each team committed. It is not a"
+echo "status any team has signed off, and it cannot see work that was not pushed."

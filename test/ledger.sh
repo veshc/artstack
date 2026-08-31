@@ -246,6 +246,62 @@ print('INVALID' if bad else 'ALLVALID')
   assert_eq "the decision log is valid JSON" "$RES" "ALLVALID"
 fi
 
+# ── ART layer ─────────────────────────────────────────────────
+echo "the train layer"
+REPO="$(new_repo)"; cd "$REPO"
+add_team "$REPO" falcon
+"$BIN/artstack-log" command=review verdict=APPROVE item=1 >/dev/null 2>&1
+"$BIN/artstack-dependency" add --on orion --what "version the events API" --by IP-2 >/dev/null 2>&1
+add_team "$REPO" orion
+"$BIN/artstack-log" command=review verdict=REQUEST_CHANGES item=2 >/dev/null 2>&1
+
+OUT="$("$BIN/artstack-roll" 2>&1)"
+assert_contains "the roll-up sees both teams (falcon)" "$OUT" "falcon"
+assert_contains "the roll-up sees both teams (orion)"  "$OUT" "orion"
+assert_contains "it flags a blocked review"            "$OUT" "REQUEST_CHANGES"
+# An RTE who cannot tell the view is partial will believe it.
+assert_contains "it states what it can and cannot see" "$OUT" "Inputs"
+assert_contains "and refuses to imply sign-off"        "$OUT" "status any team has signed off"
+
+OUT="$("$BIN/artstack-dependency" board 2>&1)"
+assert_contains "a new dependency starts as requested" "$OUT" "requested"
+assert_contains "and says nobody has agreed"           "$OUT" "nobody has agreed"
+
+ID="$(printf '%s' "$OUT" | awk '/^orion-/ {print $1; exit}')"
+"$BIN/artstack-dependency" set "$ID" --state committed --note "agreed at sync" >/dev/null 2>&1
+OUT="$("$BIN/artstack-dependency" board 2>&1)"
+assert_contains "a transition moves the state"   "$OUT" "committed"
+assert_absent   "and the warning goes away"      "$OUT" "nobody has agreed"
+
+"$BIN/artstack-dependency" set "$ID" --state nonsense >/dev/null 2>&1
+assert_eq "an invalid state is rejected" "$?" "2"
+"$BIN/artstack-dependency" set no-such-id --state committed >/dev/null 2>&1
+assert_eq "an unknown id is rejected" "$?" "1"
+
+# History is append-only: how long something sat in requested is exactly what a
+# retrospective needs, so a transition must not overwrite the original.
+DEPS="$REPO/.artstack/train/dependencies.jsonl"
+LINES="$(grep -c . "$DEPS")"
+[ "$LINES" -ge 2 ] && ok "dependency history is append-only" \
+  || bad "dependency history is append-only" "expected >=2 records, got $LINES"
+
+# ── JSON reader ───────────────────────────────────────────────
+echo "the json reader"
+printf '%s\n' '{"a":"x","n":3,"b":true}' '{"a":"y","n":4,"b":false}' > "$WORK/j.jsonl"
+OUT="$("$BIN/artstack-json" fields a,n < "$WORK/j.jsonl")"
+assert_contains "fields extracts values" "$OUT" "x"
+assert_contains "including numbers"      "$OUT" "3"
+OUT="$("$BIN/artstack-json" filter a=y < "$WORK/j.jsonl")"
+assert_contains "filter selects a record" "$OUT" '"a":"y"'
+assert_absent   "and excludes the others" "$OUT" '"a":"x"'
+OUT="$("$BIN/artstack-json" count a < "$WORK/j.jsonl")"
+assert_contains "count tallies by value" "$OUT" "x"
+
+# A malformed line must not make the whole train view unreadable.
+printf '%s\n' 'not json at all' >> "$WORK/j.jsonl"
+OUT="$("$BIN/artstack-json" fields a < "$WORK/j.jsonl" 2>/dev/null)"
+assert_contains "a malformed line is skipped, not fatal" "$OUT" "x"
+
 # ── Degraded mode ─────────────────────────────────────────────
 echo "degrades outside a git repo"
 NOGIT="$WORK/nogit"; mkdir -p "$NOGIT"; cd "$NOGIT"

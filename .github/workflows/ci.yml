@@ -53,9 +53,12 @@ jobs:
       # than trusting the document, and make a violation a review conversation.
       - name: No network calls in scripts
         run: |
-          # Every script except the injection detector: any mention at all is
-          # suspicious and worth a human looking at it.
-          if grep -rnE '(curl|wget|nc |ping )' build setup bin/ --exclude=artstack-guard \
+          # Word boundaries matter here. Without them "ping " matches inside
+          # "skipping ", and "nc " inside plenty of prose - this gate produced
+          # three false positives before the boundaries went in, each one a
+          # comment or a message rather than a call.
+          if grep -rnE '(^|[^[:alnum:]_-])(curl|wget|nc|ping)([[:space:]]|$)' \
+               build setup bin/ --exclude=artstack-guard \
                | grep -vE '^\s*[^:]+:[0-9]+:\s*#' ; then
             echo "Network command found in an ArtStack script."
             echo "ArtStack makes no network calls. See docs/security.md."
@@ -102,17 +105,20 @@ jobs:
 
       - name: No skill claims authority to merge or push to main
         run: |
+          # Derived, not listed. A hardcoded exemption list goes stale the next
+          # time a read-only skill is added, and a stale allowlist in a safety
+          # gate fails in the dangerous direction. The property that actually
+          # matters is whether a skill can write at all: only a skill holding
+          # Write or Edit can land anything, so only those must carry the rule.
           bad=0
           for f in skills/*/SKILL.md; do
-            grep -qE 'Never (merge|push to)' "$f" && continue
-            grep -qE 'Do not merge' "$f" && continue
-            case "$f" in
-              */artstack/*|*/wsjf/*|*/defect/*|*/demo-prep/*|*/test-plan/*|*/pi-prep/*|*/feature-review/*|*/arch-runway/*|*/plan-feature/*|*/verify/*) continue ;;
-            esac
-            echo "no merge prohibition found in $f"; bad=1
+            fm="$(sed -n '1,/^---$/{2,$p;}' "$f" | sed -n '/^allowed-tools:/,/^[a-z-]*:/p')"
+            printf '%s' "$fm" | grep -qE '^[[:space:]]*-[[:space:]]*(Write|Edit)[[:space:]]*$' || continue
+            grep -qE 'Never (merge|push to)|Do not merge' "$f" && continue
+            echo "write-capable skill with no merge prohibition: $f"; bad=1
           done
           [ "$bad" = "0" ] || exit 1
-          echo "No skill claims merge authority."
+          echo "Every write-capable skill prohibits merging."
 
       - name: Open questions rule present in every skill
         run: |
