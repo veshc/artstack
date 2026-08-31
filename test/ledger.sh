@@ -97,6 +97,16 @@ else
   echo "  skip python3 absent - JSON validity unchecked"
 fi
 
+# A quoting mistake at the call site once produced a command literally named
+# "review item=1": it landed in the ledger, never matched the dashboard's
+# canonical list, and reported the real command as never run.
+"$BIN/artstack-log" "command=review item=1 verdict=APPROVE" >/dev/null 2>&1
+assert_eq "a malformed command name is rejected" "$?" "2"
+"$BIN/artstack-log" command=Review >/dev/null 2>&1
+assert_eq "an uppercase command name is rejected" "$?" "2"
+"$BIN/artstack-log" command=plan-feature item=9 >/dev/null 2>&1
+assert_eq "a valid hyphenated name is accepted" "$?" "0"
+
 # ── Team keying ───────────────────────────────────────────────
 echo "every record carries a team"
 REPO="$(new_repo)"; cd "$REPO"
@@ -301,6 +311,20 @@ assert_contains "count tallies by value" "$OUT" "x"
 printf '%s\n' 'not json at all' >> "$WORK/j.jsonl"
 OUT="$("$BIN/artstack-json" fields a < "$WORK/j.jsonl" 2>/dev/null)"
 assert_contains "a malformed line is skipped, not fatal" "$OUT" "x"
+
+# The dashboard's canonical order must track the real lifecycle, or a scoped
+# view reports shipped work as never run.
+echo "dashboard covers the real lifecycle"
+REPO="$(new_repo)"; cd "$REPO"
+add_team "$REPO" falcon
+for c in pi-prep arch-runway implement review ship verify; do
+  "$BIN/artstack-log" command=$c item=42 >/dev/null 2>&1
+done
+OUT="$("$BIN/artstack-read" --item 42 2>&1)"
+for c in implement ship verify; do
+  assert_contains "the dashboard lists $c in order" "$OUT" "$c"
+done
+assert_absent "and no longer lists commands that do not exist" "$OUT" "pi-planning-prep"
 
 # ── Metrics ───────────────────────────────────────────────────
 echo "usage metrics"

@@ -6,15 +6,27 @@ ArtStack is an open-source set of Claude Code commands for software engineers an
 
 More work in less time, for the people on the train who actually live in a terminal.
 
-> **Status: dogfooding.** We are running ArtStack on a live agile release train for one full planning interval before calling it 1.0. Measured results will be published here when the PI completes.
+> **Status: built, not yet dogfooded.** The workflow is complete end to end and
+> tested, and has not yet run a full planning interval on a live train. No
+> results are claimed until it has.
 >
-> Placeholder for dogfood numbers: hours saved on PI prep, artifact acceptance rate, test authoring time. Real numbers or no claim.
+> `bin/artstack-metrics` produces the numbers, from your own ledger, locally. It
+> reports command usage, how far work gets through the chain, and how long
+> dependencies sit unagreed. It deliberately does not report hours saved or
+> artifact acceptance: the ledger does not know them, and inventing them is
+> exactly what "real numbers or no claim" was meant to prevent.
 
 ## Why not just gstack
 
 gstack is excellent and this project would not exist without it. But it is built for a solo founder shipping to main: CEO reviews, office hours, founder mode. On a release train you already have a product owner, a system architect, gated PRs, and a train cadence. ArtStack keeps what transfers (role embodiment, planning-first workflow, review rigor) and replaces the startup framing with train roles and train artifacts.
 
-## Two tracks, ten skills
+## Nineteen skills across the lifecycle
+
+### Plan
+
+| Skill | Role | What it does |
+| --- | --- | --- |
+| `/plan-feature` | Pipeline | One feature from raw work item to locked plan: decompose, challenge scope, lock the runway, agree the test approach. Decides what the team owns, escalates what it does not |
 
 ### Engineer track
 
@@ -25,6 +37,10 @@ gstack is excellent and this project would not exist without it. But it is built
 | `/feature-review` | Product owner | Challenges scope in four modes: expand, selectively expand, hold, reduce |
 | `/arch-runway` | System architect | Reviews plans against architectural runway and NFRs, locks data flow and edge cases |
 | `/review` | Staff engineer | Deep code review that catches what CI misses |
+| `/implement` | Engineer | Builds a story against the locked plan, code and tests in the same commit, on a feature branch |
+| `/investigate` | Debugger | Root cause before any fix. Reproduce, trace, one hypothesis at a time, stop after three failures |
+| `/ship` | Release engineer | Merges the base branch, runs tests, checks criteria, opens the pull request. Never merges it |
+| `/verify` | Verifier | Checks the running system against what the story promised, after it lands |
 | `/demo-prep` | Presenter | Builds a system-demo script from the iteration's completed work |
 
 ### QA automation track
@@ -35,6 +51,44 @@ gstack is excellent and this project would not exist without it. But it is built
 | `/automate` | Automation engineer | Writes automated tests in your team's framework, following your existing patterns |
 | `/regression` | Regression strategist | Blast-radius analysis, suite selection, gap detection, missing-test generation |
 | `/defect` | Defect analyst | Drafts a complete defect report from a failure; you review and file it |
+
+### Train track
+
+| Skill | Role | What it does |
+| --- | --- | --- |
+| `/art-status` | Release train engineer | The train view across teams: activity, objectives, dependencies, and what the view cannot see |
+| `/dependency` | Coordinator | Cross-team dependencies as objects with state, so "requested" and "committed" stop looking alike |
+| `/inspect-adapt` | Facilitator | Evidence for the inspect and adapt session, from what actually happened |
+
+## Who decides
+
+Every skill classifies the decisions it reaches. MECHANICAL and TEAM choices it
+takes, with reasons. PRODUCT OWNER and TRAIN choices it never takes: it presents
+the options and the recommendation and stops. When unsure which side a decision
+falls on, it escalates.
+
+That boundary is recorded, not just described. `artstack-decide` logs what was
+taken and what was refused, and a record on someone else's call cannot be
+written as "decided".
+
+## State
+
+ArtStack records what each command did in `.artstack/` in your repo, committed
+with the code, so the team shares one copy.
+
+Records bind to content rather than commits: a rebase or squash that preserves
+content keeps a review current, a real edit makes it stale. Every record carries
+a team, so `artstack-roll` can assemble a train view from what teams already
+committed — and it leads with what it cannot see before it shows a number.
+
+```bash
+bin/artstack-read                 # is this branch ready
+bin/artstack-read --team falcon   # one team on its own
+bin/artstack-roll                 # the train view
+bin/artstack-dependency board     # who is waiting on whom
+bin/artstack-decide --open        # what is waiting on a human
+bin/artstack-metrics              # what ArtStack actually did here
+```
 
 ## How it knows your train
 
