@@ -53,9 +53,12 @@ jobs:
       # than trusting the document, and make a violation a review conversation.
       - name: No network calls in scripts
         run: |
-          # Every script except the injection detector: any mention at all is
-          # suspicious and worth a human looking at it.
-          if grep -rnE '(curl|wget|nc |ping )' build setup bin/ --exclude=artstack-guard \
+          # Word boundaries matter here. Without them "ping " matches inside
+          # "skipping ", and "nc " inside plenty of prose - this gate produced
+          # three false positives before the boundaries went in, each one a
+          # comment or a message rather than a call.
+          if grep -rnE '(^|[^[:alnum:]_-])(curl|wget|nc|ping)([[:space:]]|$)' \
+               build setup bin/ --exclude=artstack-guard \
                | grep -vE '^\s*[^:]+:[0-9]+:\s*#' ; then
             echo "Network command found in an ArtStack script."
             echo "ArtStack makes no network calls. See docs/security.md."
