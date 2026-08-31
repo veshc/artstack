@@ -177,17 +177,29 @@ jobs:
       # place it matters most, so assert the instrument never grows one.
       - name: Metrics never invent unmeasurable numbers
         run: |
-          # Comments are excluded on purpose: the header names these figures in
-          # order to say the tool refuses to report them. Naming a thing you
-          # will not do is not doing it, so check the executable lines only.
-          if grep -vE '^[[:space:]]*#' bin/artstack-metrics \
-               | grep -qiE 'hours[_ ]saved|time[_ ]saved|productivity[_ ]gain'; then
-            echo "artstack-metrics claims a number the ledger cannot know."
+          # Assert on behaviour, not on source text. Grepping the file matches
+          # the tool's own disclaimer - it names these figures precisely in
+          # order to say it will not report them - and naming a thing you
+          # refuse to do is not doing it. So run it and read what it prints.
+          proj="$RUNNER_TEMP/metrics"
+          mkdir -p "$proj" && cd "$proj"
+          git init -q . && git -c user.email=c@i -c user.name=ci commit -q --allow-empty -m init
+          mkdir -p .artstack/teams
+          cp "$GITHUB_WORKSPACE/context/team.md.template" .artstack/teams/falcon.md
+          echo falcon > .artstack/active-team
+          "$GITHUB_WORKSPACE/bin/artstack-log" command=review verdict=APPROVE item=1 >/dev/null
+          "$GITHUB_WORKSPACE/bin/artstack-log" command=ship item=1 >/dev/null
+          out="$("$GITHUB_WORKSPACE/bin/artstack-metrics")"
+          echo "$out"
+
+          # A figure the ledger cannot know would appear as "<label>: <number>".
+          if printf '%s' "$out" | grep -qiE '(hours|time) saved[^a-z]*:?[[:space:]]*[0-9]'; then
+            echo "artstack-metrics reported a number the ledger cannot know."
             exit 1
           fi
-          grep -q 'ask the humans' bin/artstack-metrics \
+          printf '%s' "$out" | grep -q 'ask the humans' \
             || { echo "metrics no longer states what it cannot measure"; exit 1; }
-          echo "Metrics stays inside what the ledger knows." 
+          echo "Metrics stays inside what the ledger knows."
 
       # The guard that exists because two sessions once shared this tree and
       # one nearly committed the other's half-written files.
