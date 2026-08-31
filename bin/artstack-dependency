@@ -70,8 +70,10 @@ case "$ACTION" in
     mkdir -p "$(dirname "$DEPS")"
     # A short stable id from the owning team plus a counter, so a human can
     # refer to one out loud in a stand-up.
+    # grep -c prints 0 and exits 1 on an empty file; the `|| echo 0` fallback
+    # would then yield "0\n0" and break the arithmetic.
     N=1
-    [ -f "$DEPS" ] && N=$(( $(grep -c . "$DEPS" 2>/dev/null || echo 0) + 1 ))
+    [ -f "$DEPS" ] && N=$(( $(awk 'NF{n++} END{print n+0}' "$DEPS" 2>/dev/null || echo 0) + 1 ))
     DEP_ID="$(_safe "$ON")-$N"
     REC="{\"id\":\"$DEP_ID\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
     REC="$REC,\"from_team\":\"$(_esc "${ARTSTACK_TEAM_NAME:-unknown}")\""

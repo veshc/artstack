@@ -112,7 +112,8 @@ if [ "$MISSING" -gt 0 ]; then
   echo "  Everything below is missing whatever those teams did."
 fi
 
-TOTAL="$(grep -c . "$TMP" 2>/dev/null || echo 0)"
+# See artstack-metrics: grep -c on an empty file prints 0 and exits 1.
+TOTAL="$(awk 'NF{n++} END{print n+0}' "$TMP" 2>/dev/null || echo 0)"
 if [ "$TOTAL" -eq 0 ]; then
   echo ""
   echo "No records found. Nothing to report, rather than an empty train."

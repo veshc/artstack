@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# artstack-metrics - what ArtStack actually did, from your own ledger.
+#
+# Usage:
+#   artstack-metrics                    # this repo
+#   artstack-metrics --repos <file>     # across the train
+#   artstack-metrics --since 90d
+#
+# This is the dogfood instrument. The README promises measured results before a
+# 1.0 claim, and this is what produces them - from records already on disk, on
+# this machine, with no telemetry and nothing sent anywhere.
+#
+# What it can honestly measure:
+#   - which commands are used, and which are used more than once
+#   - how often a review is run against content it actually matches
+#   - how much work reaches ship and verify rather than stopping earlier
+#   - how long dependencies sit before anyone agrees to them
+#   - how many decisions were escalated rather than taken
+#
+# What it cannot measure, and will not pretend to:
+#   - time saved. Nothing here records how long anything took by hand, and a
+#     saved-hours number invented from command counts would be a lie in the one
+#     place the project promised honesty.
+#   - artifact acceptance. Whether a human used a draft is not in the ledger.
+#     Ask the humans; that is a survey, not a metric.
+#
+# The most useful output is the unused-command list. A command nobody ran twice
+# is either wrong for the train or badly explained, and cutting it is a better
+# outcome than keeping it because it was written.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPOS_FILE=""
+SINCE=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repos) REPOS_FILE="${2:-}"; shift 2 ;;
+    --since) SINCE="${2:-}"; shift 2 ;;
+    --help|-h) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "artstack-metrics: unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+CUTOFF=""
+if [ -n "$SINCE" ]; then
+  DAYS="${SINCE%d}"
+  case "$DAYS" in ''|*[!0-9]*) echo "artstack-metrics: --since takes days, e.g. 90d" >&2; exit 2 ;; esac
+  NOW=$(date -u +%s)
+  CUTOFF=$(date -u -r $((NOW - DAYS * 86400)) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d "@$((NOW - DAYS * 86400))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)
+fi
+
+REPOS="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+[ -n "$REPOS_FILE" ] && REPOS="$(grep -vE '^[[:space:]]*(#|$)' "$REPOS_FILE" || true)"
+
+TMP="$(mktemp "${TMPDIR:-/tmp}/artstack-metrics-XXXXXX")"
+trap 'rm -f "$TMP" "$TMP.dec" "$TMP.dep"' EXIT
+: > "$TMP"; : > "$TMP.dec"; : > "$TMP.dep"
+
+while IFS= read -r repo; do
+  [ -n "$repo" ] || continue
+  s="$repo/.artstack"
+  [ -d "$s" ] || continue
+  for f in "$s"/ledger/*.jsonl;    do [ -f "$f" ] && cat "$f" >> "$TMP"; done
+  for f in "$s"/decisions/*.jsonl; do [ -f "$f" ] && cat "$f" >> "$TMP.dec"; done
+  [ -f "$s/train/dependencies.jsonl" ] && cat "$s/train/dependencies.jsonl" >> "$TMP.dep"
+done <<EOF
+$REPOS
+EOF
+
+# grep -c prints 0 AND exits 1 on an empty file, so `|| echo 0` appends a
+# second zero and every later numeric test breaks. Count without the trap.
+TOTAL="$(awk 'NF{n++} END{print n+0}' "$TMP" 2>/dev/null || echo 0)"
+echo ""
+echo "ArtStack usage"
+echo "==============================================================="
+if [ "$TOTAL" -eq 0 ]; then
+  echo "No records yet. Nothing to measure, which is itself the honest answer."
+  exit 0
+fi
+
+echo ""
+echo "Commands"
+echo "---------------------------------------------------------------"
+"$SCRIPT_DIR/artstack-json" fields command,ts < "$TMP" \
+| awk -F'\t' -v cutoff="$CUTOFF" '
+  { if (cutoff != "" && $2 < cutoff) next; c[$1]++; n++ }
+  END {
+    all = "pi-prep wsjf feature-review arch-runway plan-feature implement review test-plan automate regression defect investigate ship verify demo-prep art-status dependency inspect-adapt"
+    k = split(all, known, " ")
+    for (i = 1; i <= k; i++) { cmd = known[i]; printf "  %-16s %d\n", cmd, c[cmd]+0 }
+    for (cmd in c) {
+      seen = 0
+      for (i = 1; i <= k; i++) if (known[i] == cmd) seen = 1
+      if (!seen) printf "  %-16s %d  (not a known command)\n", cmd, c[cmd]
+    }
+    print ""
+    unused = ""; once = ""
+    for (i = 1; i <= k; i++) {
+      cmd = known[i]
+      if (c[cmd]+0 == 0) unused = unused " " cmd
+      else if (c[cmd] == 1) once = once " " cmd
+    }
+    if (unused != "") print "  Never run:" unused
+    if (once != "")   print "  Run once:" once
+    if (unused != "" || once != "")
+      print "  A command nobody ran twice is wrong for this train or badly explained."
+  }'
+
+echo ""
+echo "Reaching the end of the chain"
+echo "---------------------------------------------------------------"
+"$SCRIPT_DIR/artstack-json" fields command,item,verdict < "$TMP" \
+| awk -F'\t' '
+  { if ($2 == "") next
+    item[$2] = 1
+    if ($1 == "review")    reviewed[$2] = 1
+    if ($1 == "ship")      shipped[$2]  = 1
+    if ($1 == "verify")    verified[$2] = 1 }
+  END {
+    for (i in item) { n++
+      if (i in reviewed) r++
+      if (i in shipped)  s++
+      if (i in verified) v++ }
+    if (n == 0) { print "  No work items tracked yet."; exit }
+    printf "  work items seen : %d\n", n
+    printf "  reached review  : %d\n", r+0
+    printf "  reached ship    : %d\n", s+0
+    printf "  reached verify  : %d\n", v+0
+    print ""
+    print "  Items that stop before verify are not necessarily abandoned - they"
+    print "  may simply not have been recorded. Read this as coverage of the"
+    print "  ledger, not as delivery throughput."
+  }'
+
+if [ -s "$TMP.dec" ]; then
+  echo ""
+  echo "Decisions"
+  echo "---------------------------------------------------------------"
+  "$SCRIPT_DIR/artstack-json" fields class,status < "$TMP.dec" \
+  | awk -F'\t' '
+    { c[$1]++; if ($2 == "escalated") e++ ; n++ }
+    END {
+      for (k in c) printf "  %-16s %d\n", k, c[k]
+      printf "\n  escalated to a human: %d of %d\n", e+0, n
+      print "  A tool that never escalates is either trivial or overreaching."
+    }'
+fi
+
+if [ -s "$TMP.dep" ]; then
+  echo ""
+  echo "Dependencies"
+  echo "---------------------------------------------------------------"
+  "$SCRIPT_DIR/artstack-json" fields id,state,transition < "$TMP.dep" \
+  | awk -F'\t' '
+    { if ($3 == "true") { st[$1] = $2; next }
+      if (!($1 in st)) st[$1] = $2; ids[$1] = 1 }
+    END {
+      for (i in ids) { n++; c[st[i]]++ }
+      if (n == 0) { print "  none recorded"; exit }
+      printf "  raised: %d\n", n
+      for (s in c) printf "  %-12s %d\n", s, c[s]
+      if (c["requested"] > 0)
+        printf "\n  %d never got past requested. Nobody agreed to those.\n", c["requested"]
+    }'
+fi
+
+echo ""
+echo "==============================================================="
+echo "Measured from your own ledger, on this machine. Nothing was sent"
+echo "anywhere. Hours saved and artifact acceptance are not in here"
+echo "because the ledger does not know them - ask the humans instead."

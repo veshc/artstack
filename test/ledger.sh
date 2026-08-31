@@ -302,6 +302,36 @@ printf '%s\n' 'not json at all' >> "$WORK/j.jsonl"
 OUT="$("$BIN/artstack-json" fields a < "$WORK/j.jsonl" 2>/dev/null)"
 assert_contains "a malformed line is skipped, not fatal" "$OUT" "x"
 
+# ── Metrics ───────────────────────────────────────────────────
+echo "usage metrics"
+REPO="$(new_repo)"; cd "$REPO"
+add_team "$REPO" falcon
+"$BIN/artstack-log" command=review verdict=APPROVE item=1 >/dev/null 2>&1
+"$BIN/artstack-log" command=ship item=1 >/dev/null 2>&1
+OUT="$("$BIN/artstack-metrics" 2>&1)"
+assert_contains "it counts commands"            "$OUT" "review"
+assert_contains "it names commands never run"   "$OUT" "Never run"
+assert_contains "it tracks chain completion"    "$OUT" "reached ship"
+# The project promised measured results or no claim. A saved-hours number
+# invented from command counts would break that promise in the one place it
+# most matters.
+assert_contains "it refuses to invent hours saved" "$OUT" "not in here"
+assert_absent   "and reports no time saved"        "$OUT" "hours saved:"
+
+REPO="$(new_repo)"; cd "$REPO"
+OUT="$("$BIN/artstack-metrics" 2>&1)"
+assert_contains "an empty ledger says so honestly" "$OUT" "Nothing to measure"
+
+# ── Team bootstrap ────────────────────────────────────────────
+echo "team bootstrap"
+REPO="$(new_repo)"; cd "$REPO"
+"$ROOT/setup" --team-init >/dev/null 2>&1
+assert_contains "it writes a CLAUDE.md section" "$(cat CLAUDE.md 2>/dev/null)" "## ArtStack"
+BEFORE="$(wc -l < CLAUDE.md)"
+"$ROOT/setup" --team-init >/dev/null 2>&1
+AFTER="$(wc -l < CLAUDE.md)"
+assert_eq "re-running does not duplicate it" "$AFTER" "$BEFORE"
+
 # ── Degraded mode ─────────────────────────────────────────────
 echo "degrades outside a git repo"
 NOGIT="$WORK/nogit"; mkdir -p "$NOGIT"; cd "$NOGIT"
