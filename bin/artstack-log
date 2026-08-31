@@ -95,6 +95,7 @@ _is_bound_field() {
 
 BODY=""
 SAW_COMMAND=0
+CMD_VALUE=""
 for pair in "$@"; do
   case "$pair" in
     *=*) ;;
@@ -108,7 +109,7 @@ for pair in "$@"; do
   if _is_bound_field "$k"; then
     continue  # silently dropped, stamped below from the real environment
   fi
-  [ "$k" = "command" ] && SAW_COMMAND=1
+  if [ "$k" = "command" ]; then SAW_COMMAND=1; CMD_VALUE="$v"; fi
   if _is_always_string "$k"; then
     BODY="$BODY,\"$k\":\"$(_esc "$v")\""
   elif _is_bare "$v"; then
@@ -122,6 +123,17 @@ if [ "$SAW_COMMAND" = "0" ]; then
   echo "artstack-log: a record needs command=<name>" >&2
   exit 2
 fi
+
+# A command name is a skill name: lowercase, digits, dashes. Without this a
+# quoting mistake at the call site ("command=review item=1") becomes a command
+# literally named "review item=1", which lands in the ledger, never matches the
+# dashboard's canonical list, and quietly reports the real command as not run.
+case "$CMD_VALUE" in
+  ''|*[!a-z0-9-]*)
+    echo "artstack-log: bad command name '$CMD_VALUE' (expected lowercase, digits and dashes)" >&2
+    exit 2
+    ;;
+esac
 
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"

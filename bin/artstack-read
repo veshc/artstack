@@ -111,7 +111,10 @@ function jget(line, key,   re, s, p) {
   seen[cmd]    = 1
 }
 END {
-  order = "pi-prep wsjf feature-review arch-runway review demo-prep test-plan automate regression defect dependency-check iteration-retro system-demo inspect-adapt pi-planning-prep"
+  # The lifecycle in the order a train runs it. Anything not listed still
+  # gets a row below; this only controls presentation order and which rows
+  # appear as "not yet run" when scoped to one item.
+  order = "plan-feature pi-prep wsjf feature-review arch-runway test-plan implement automate review regression investigate defect ship verify demo-prep dependency art-status inspect-adapt"
   n = split(order, ord, " ")
 
   hdr = "ArtStack readiness - branch " branch
